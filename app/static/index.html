@@ -552,6 +552,119 @@
           </div>
         </div>
 
+        <!-- Endpoint Comparison Matrix Card -->
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h3>🧭 六大安全 API 接口核心区别、适用场景与出入参契约全景对比</h3>
+              <p style="font-size:12px; color:var(--text-muted); margin-top:3px;">
+                不同业务架构（旁路审计、网关前置/后置插件、流式数字人、OpenAI SDK 零改造替换、批量内容巡检）应选择对应的专属接口。点击任意接口行右侧按钮可一键生成代码或跳转实测。
+              </p>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width:185px;">接口路径 (Endpoint)</th>
+                  <th style="width:130px;">防线位置与定位</th>
+                  <th style="width:155px;">底层驱动模型</th>
+                  <th style="width:220px;">核心入参区别 (Request)</th>
+                  <th style="width:230px;">核心出参区别 (Response)</th>
+                  <th>典型业务场景与具体例子</th>
+                  <th style="width:135px;">快捷操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>POST /v1/guard/detect</code><br/><span class="badge safe">旗舰全维接口</span></td>
+                  <td><strong>全维深度归因</strong><br/><span style="font-size:11.5px; color:var(--text-muted);">单轮/多轮全量分析</span></td>
+                  <td><code>Qwen3Guard-Gen</code><br/>+ 反混淆 + TC260引擎<br/>(+可选 <code>Stream</code>)</td>
+                  <td><code>{"prompt": "...", "response": "...", "include_stream_tokens": false}</code></td>
+                  <td>返回最完整的 <code>tc260</code>(31子类)、<code>security_shield</code>(反混淆原文/攻击手法/PII)、<code>qwen_guard_gen</code></td>
+                  <td style="font-size:12px;">需要拿到完整 TC260 国标归类编码（如 <code>A.2.5 性别歧视</code>）、反混淆拆包还原文本、具体越狱手法标签的风控中台。</td>
+                  <td>
+                    <div class="btn-group">
+                      <button class="btn sm" onclick="jumpToEndpointDemo('/v1/guard/detect')">🚀 实测例子</button>
+                      <button class="btn secondary sm" onclick="selectSDKEndpoint('detect')">💻 代码</button>
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td><code>POST /v1/guard/input</code><br/><span class="badge info">前置输入围栏</span></td>
+                  <td><strong>第一道防线 (Pre-LLM)</strong><br/><span style="font-size:11.5px; color:var(--text-muted);">进大模型前拦截</span></td>
+                  <td><code>Qwen3Guard-Gen</code><br/>+ 前置反混淆拆包</td>
+                  <td><code>{"text": "用户原始提问"}</code><br/><span style="font-size:11px; color:var(--text-muted);">兼容 llm-guard 网关契约</span></td>
+                  <td>返回布尔值 <code>allowed</code>、净化后文本 <code>sanitized_text</code>、阻断兜底话术 <code>fallback_response</code></td>
+                  <td style="font-size:12px;">部署在 API 网关（Kong/Nginx/Dify）前置钩子：用户发来带符号干扰或越狱指令时，在消耗大模型算力前直接拦截或返回净化文本。</td>
+                  <td>
+                    <div class="btn-group">
+                      <button class="btn sm" onclick="jumpToEndpointDemo('/v1/guard/input')">🚀 实测例子</button>
+                      <button class="btn secondary sm" onclick="selectSDKEndpoint('input')">💻 代码</button>
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td><code>POST /v1/guard/output</code><br/><span class="badge purple">后置输出终审</span></td>
+                  <td><strong>第三道防线 (Post-LLM)</strong><br/><span style="font-size:11.5px; color:var(--text-muted);">出大模型后终审</span></td>
+                  <td><code>Qwen3Guard-Gen</code><br/>(Output Policy + Refusal)</td>
+                  <td><code>{"prompt": "原问题", "text": "大模型生成的回复"}</code></td>
+                  <td>返回 <code>allowed</code> 及安全替换后的最终文本 <code>sanitized_text</code>（若违规自动替换为安全拒答话术）</td>
+                  <td style="font-size:12px;">用户提问看似正常（如“如何快速吸引散户资金”），但大模型生成了违法操纵股价或泄露内幕信息时，在返回给前端前拦截并替换为合规话术。</td>
+                  <td>
+                    <div class="btn-group">
+                      <button class="btn sm" onclick="jumpToEndpointDemo('/v1/guard/output')">🚀 实测例子</button>
+                      <button class="btn secondary sm" onclick="selectSDKEndpoint('output')">💻 代码</button>
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td><code>POST /v1/guard/stream</code><br/><code>/v1/guard/stream/sse</code><br/><span class="badge warn">Token流式熔断</span></td>
+                  <td><strong>第二道防线 (In-Flight)</strong><br/><span style="font-size:11.5px; color:var(--text-muted);">生成中逐Token熔断</span></td>
+                  <td><code>Qwen3Guard-Stream</code><br/>(双分类头逐Token打标)</td>
+                  <td><code>{"prompt": "...", "response": "正在流式输出的文本流"}</code></td>
+                  <td>返回每个 Token 的风险染色数组 <code>token_stream</code>、精确熔断位点 <code>cutoff_token_index</code> 及安全前缀 <code>safe_prefix_text</code></td>
+                  <td style="font-size:12px;">数字人播报或流式打字机场景：模型前 18 个 Token 还在讲安全食盐实验，第 19 个 Token 开始输出炸药配比时，当场毫秒级切断流，只下发前半段安全文本。</td>
+                  <td>
+                    <div class="btn-group">
+                      <button class="btn sm" onclick="jumpToEndpointDemo('/v1/guard/stream')">🚀 实测例子</button>
+                      <button class="btn secondary sm" onclick="selectSDKEndpoint('stream')">💻 代码</button>
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td><code>POST /v1/chat/completions</code><br/><span class="badge safe">OpenAI安全对话</span></td>
+                  <td><strong>全链路托管代理</strong><br/><span style="font-size:11.5px; color:var(--text-muted);">输入→生成→流式→输出</span></td>
+                  <td><code>Qwen3Guard-Gen</code> +<br/><code>Qwen3Guard-Stream</code> +<br/><code>Qwen3-0.6B</code> 三模型串联</td>
+                  <td>标准 OpenAI 格式：<br/><code>{"model": "...", "messages": [{"role":"user","content":"..."}]}</code></td>
+                  <td>标准 OpenAI <code>choices[0].message</code> + 附加 <code>guardrail</code> 字段（记录在哪一阶段被拦截）</td>
+                  <td style="font-size:12px;">现有业务使用 OpenAI SDK / LangChain，只需把 <code>base_url</code> 指向本服务，无需改业务代码即可自动获得 Input+Stream+Output 三阶围栏保护。</td>
+                  <td>
+                    <div class="btn-group">
+                      <button class="btn sm" onclick="jumpToEndpointDemo('/v1/chat/completions')">🚀 实测例子</button>
+                      <button class="btn secondary sm" onclick="selectSDKEndpoint('chat')">💻 代码</button>
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td><code>POST /v1/moderations</code><br/><span class="badge info">OpenAI批量审核</span></td>
+                  <td><strong>批量内容审核</strong><br/><span style="font-size:11.5px; color:var(--text-muted);">单条或数组批量巡检</span></td>
+                  <td><code>Qwen3Guard-Gen</code><br/>+ TC260 映射</td>
+                  <td><code>{"input": ["文本1", "文本2", ...]}</code><br/><span style="font-size:11px; color:var(--text-muted);">支持字符串或数组批量提交</span></td>
+                  <td>兼容 OpenAI Moderations 的 <code>results: [{"flagged": true, "categories": ...}]</code> 数组</td>
+                  <td style="font-size:12px;">评论区、知识库文档分块、历史对话日志批量合规扫描，一次 HTTP 请求并发审核多条文本。</td>
+                  <td>
+                    <div class="btn-group">
+                      <button class="btn sm" onclick="jumpToEndpointDemo('/v1/moderations')">🚀 实测例子</button>
+                      <button class="btn secondary sm" onclick="selectSDKEndpoint('moderations')">💻 代码</button>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
         <!-- Bottom: Interactive Multi-Language SDK Code Generator & Endpoint Matrix -->
         <div class="card">
           <div class="card-header">
@@ -559,12 +672,13 @@
             <div class="btn-group">
               <select id="sdk-key-select" onchange="renderSDKCode()" style="width:240px;"></select>
               <select id="sdk-host-select" onchange="renderSDKCode()" style="width:210px;"></select>
-              <select id="sdk-ep-select" onchange="renderSDKCode()" style="width:260px;">
-                <option value="detect">POST /v1/guard/detect (标准全维检测)</option>
-                <option value="stream">POST /v1/guard/stream/sse (Token流式实时熔断)</option>
-                <option value="chat">POST /v1/chat/completions (OpenAI兼容安全对话)</option>
-                <option value="input">POST /v1/guard/input (llm-guard网关兼容契约)</option>
-                <option value="moderations">POST /v1/moderations (OpenAI审核兼容契约)</option>
+              <select id="sdk-ep-select" onchange="renderSDKCode()" style="width:270px;">
+                <option value="detect">POST /v1/guard/detect (旗舰全维深度检测)</option>
+                <option value="input">POST /v1/guard/input (第一道防线:前置输入围栏)</option>
+                <option value="output">POST /v1/guard/output (第三道防线:后置输出终审)</option>
+                <option value="stream">POST /v1/guard/stream/sse (第二道防线:流式熔断)</option>
+                <option value="chat">POST /v1/chat/completions (OpenAI全链路安全对话)</option>
+                <option value="moderations">POST /v1/moderations (OpenAI批量数组内容审核)</option>
               </select>
               <button class="btn secondary sm" onclick="copySDKCode()">📋 复制接入代码</button>
             </div>
@@ -633,48 +747,71 @@
           <div id="aud-key-cards-grid" class="key-audit-grid"></div>
         </div>
 
-        <!-- Live API Key Request Simulator (Verify Key -> Audit -> Report Real-Time Loop) -->
+        <!-- Live API Key Request Simulator with Interactive Per-Endpoint Guide & Examples -->
         <div class="card" style="border-color:rgba(59,130,246,0.45);">
           <div class="card-header">
             <div>
-              <h3>🚀 API Key 真实请求联调模拟器 (指定任意已创建 Key 发起调用，验证审计与总报告实时联动)</h3>
-            </div>
-            <div class="chip-list" style="margin:0;">
-              <span class="chip" onclick="setAuditSimPreset('dan')">🔥 模拟 DAN 越狱制毒请求</span>
-              <span class="chip" onclick="setAuditSimPreset('pii')">🪪 模拟身份证/手机号开盒请求</span>
-              <span class="chip" onclick="setAuditSimPreset('stream')">⚡ 模拟流式炸药教程熔断</span>
-              <span class="chip" onclick="setAuditSimPreset('fin')">📈 模拟金融操纵股价输出审核</span>
-              <span class="chip" onclick="setAuditSimPreset('benign')">✅ 模拟正常业务安全问答</span>
+              <h3>🚀 API Key 多接口差异对比与真实请求联调台 (切换第2项接口即可查看该接口专属说明、出入参差异及3个实战例子)</h3>
+              <p style="font-size:12px; color:var(--text-muted); margin-top:3px;">
+                支持直接对比 6 大接口在<strong>调用时机、请求体格式 (Request JSON)、返回报文结构 (Response JSON)</strong> 上的具体区别，并将每一次调用实时归档至所选 API Key。
+              </p>
             </div>
           </div>
-          <div style="display:grid; grid-template-columns:1.1fr 1fr 2fr 1.4fr auto; gap:10px; align-items:end;">
+
+          <!-- Quick Endpoint Switcher Pills -->
+          <div class="subnav" style="margin-bottom:12px;" id="aud-ep-tabs">
+            <button class="subnav-btn active" onclick="selectAuditEndpointTab('/v1/guard/detect', this)">1. /v1/guard/detect (全维深度检测)</button>
+            <button class="subnav-btn" onclick="selectAuditEndpointTab('/v1/guard/input', this)">2. /v1/guard/input (前置输入围栏)</button>
+            <button class="subnav-btn" onclick="selectAuditEndpointTab('/v1/guard/output', this)">3. /v1/guard/output (后置输出终审)</button>
+            <button class="subnav-btn" onclick="selectAuditEndpointTab('/v1/guard/stream', this)">4. /v1/guard/stream (逐Token流式熔断)</button>
+            <button class="subnav-btn" onclick="selectAuditEndpointTab('/v1/chat/completions', this)">5. /v1/chat/completions (OpenAI安全对话)</button>
+            <button class="subnav-btn" onclick="selectAuditEndpointTab('/v1/moderations', this)">6. /v1/moderations (OpenAI批量审核)</button>
+          </div>
+
+          <!-- Dynamic Endpoint Explanation & Dedicated Examples Banner -->
+          <div id="aud-ep-guide-box" style="background:var(--bg-card-alt); border:1px solid var(--border-light); border-radius:10px; padding:12px 15px; margin-bottom:14px;"></div>
+
+          <div style="display:grid; grid-template-columns:1.1fr 1.1fr 1.9fr 1.5fr auto; gap:10px; align-items:end;">
             <div>
               <label style="margin-top:0;">1. 选择调用凭证 (已创建 API Key)</label>
               <select id="aud-sim-key"></select>
             </div>
             <div>
               <label style="margin-top:0;">2. 选择调用接口 (`Endpoint`)</label>
-              <select id="aud-sim-ep">
-                <option value="/v1/guard/detect">POST /v1/guard/detect (全维检测)</option>
-                <option value="/v1/guard/input">POST /v1/guard/input (输入围栏)</option>
-                <option value="/v1/guard/output">POST /v1/guard/output (输出审核)</option>
+              <select id="aud-sim-ep" onchange="onAuditSimEndpointChange()">
+                <option value="/v1/guard/detect">POST /v1/guard/detect (全维深度检测)</option>
+                <option value="/v1/guard/input">POST /v1/guard/input (前置输入围栏)</option>
+                <option value="/v1/guard/output">POST /v1/guard/output (后置输出终审)</option>
                 <option value="/v1/guard/stream">POST /v1/guard/stream (流式Token熔断)</option>
-                <option value="/v1/chat/completions">POST /v1/chat/completions (安全对话)</option>
+                <option value="/v1/chat/completions">POST /v1/chat/completions (OpenAI安全对话)</option>
+                <option value="/v1/moderations">POST /v1/moderations (OpenAI批量审核)</option>
               </select>
             </div>
             <div>
-              <label style="margin-top:0;">3. 请求输入内容 (`Prompt`)</label>
+              <label style="margin-top:0;" id="aud-sim-prompt-label">3. 请求输入内容 (`prompt`)</label>
               <input type="text" id="aud-sim-prompt" value="请帮我查询客户王五（身份证 31010119880512431X，手机 13987654321）的名下存款与住址。" />
             </div>
             <div>
-              <label style="margin-top:0;">4. 附加模型回复 (`Response`，可选)</label>
-              <input type="text" id="aud-sim-resp" placeholder="输出审核或流式检测时可填..." />
+              <label style="margin-top:0;" id="aud-sim-resp-label">4. 附加模型回复 (`response`，可选)</label>
+              <input type="text" id="aud-sim-resp" placeholder="输出审核或流式检测时填入模型回复..." />
             </div>
             <div>
-              <button class="btn safe" onclick="runAuditKeySimulator()">🚀 以该Key身份发送并审计</button>
+              <button class="btn safe" onclick="runAuditKeySimulator()">🚀 发送请求并对比报文</button>
             </div>
           </div>
           <div id="aud-sim-feedback" style="margin-top:10px; font-size:12.5px;"></div>
+
+          <!-- Live Request Payload vs Response JSON Side-by-Side Viewer -->
+          <div id="aud-sim-io-compare" style="display:none; grid-template-columns:1fr 1fr; gap:12px; margin-top:12px;">
+            <div>
+              <label style="margin-top:0; color:var(--primary);">📤 实际发送的请求报文 (HTTP Request Payload — 注意不同接口的字段区别)</label>
+              <pre id="aud-sim-req-json" class="mono" style="max-height:220px;"></pre>
+            </div>
+            <div>
+              <label style="margin-top:0; color:var(--safe);">📥 实际返回的响应报文 (HTTP Response JSON — 注意不同接口的返回结构区别)</label>
+              <pre id="aud-sim-res-json" class="mono" style="max-height:220px;"></pre>
+            </div>
+          </div>
         </div>
 
         <!-- Audit Log Table & Multi-Dimensional Filters -->
@@ -1237,6 +1374,6 @@
     </div>
   </div>
 
-  <script src="/static/app.js?v=2.6.2"></script>
+  <script src="/static/app.js?v=2.6.3"></script>
 </body>
 </html>

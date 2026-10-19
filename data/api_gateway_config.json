@@ -1,0 +1,58 @@
+{
+  "require_api_key": false,
+  "rate_limit_qps": 120,
+  "default_timeout_ms": 15000,
+  "enable_input_guard": true,
+  "enable_stream_guard": true,
+  "enable_output_guard": true,
+  "pii_action": "block",
+  "audit_retention_count": 500,
+  "upstream_llm": {
+    "provider": "local_qwen3_0.6b",
+    "base_url": "http://127.0.0.1:8092/v1",
+    "model_name": "Qwen3-0.6B-Guarded",
+    "max_Retries": 2
+  },
+  "webhook": {
+    "enabled": false,
+    "url": "https://hooks.enterprise.local/qwen3guard/alert",
+    "notify_on_levels": [
+      "Unsafe"
+    ]
+  },
+  "api_keys": [
+    {
+      "id": "key_prod_cs",
+      "name": "智能客服生产网关 (Prod-CustomerService)",
+      "prefix": "qg-live-9f8a...3c1b",
+      "token": "qg-live-9f8a7d6e5b4c3a2f1e0d9c8b7a6f3c1b",
+      "policy_preset": "tc260_standard",
+      "qps_limit": 80,
+      "enabled": true,
+      "created_at": "2026-10-18 10:00:00",
+      "calls": 1420
+    },
+    {
+      "id": "key_fin_core",
+      "name": "金融投研助手接入端 (FinTech-Core)",
+      "prefix": "qg-live-4b2e...8a9d",
+      "token": "qg-live-4b2e1c9d8f7a6b5e4d3c2b1a0f9e8a9d",
+      "policy_preset": "finance_gov_strict",
+      "qps_limit": 50,
+      "enabled": true,
+      "created_at": "2026-10-18 11:30:00",
+      "calls": 386
+    },
+    {
+      "id": "key_sec_eval",
+      "name": "TC260 合规自动化巡检 (SecAudit-Runner)",
+      "prefix": "qg-test-7c1d...5e2a",
+      "token": "qg-test-7c1d2e3f4a5b6c7d8e9f0a1b2c3d5e2a",
+      "policy_preset": "tc260_standard",
+      "qps_limit": 200,
+      "enabled": true,
+      "created_at": "2026-10-18 12:00:00",
+      "calls": 168
+    }
+  ]
+}

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Qwen3Guard 企业级大模型安全治理与 TC260 合规中台</title>
-  <link rel="stylesheet" href="/static/styles.css?v=2.6.2" />
+  <link rel="stylesheet" href="/static/styles.css?v=2.7.0" />
 </head>
 <body>
 
@@ -41,7 +41,13 @@
       <li>
         <button class="nav-item" onclick="switchView('view-gateway', 'API 网关与多语言接入配置', this)">
           <span class="nav-item-left">🔌 API 配置与网关</span>
-          <span class="nav-tag">SDK</span>
+          <span class="nav-tag">密钥</span>
+        </button>
+      </li>
+      <li>
+        <button class="nav-item" onclick="switchView('view-api-portal', 'REST API 开放平台：逐接口接入文档与动态在线调试台', this)">
+          <span class="nav-item-left">📘 REST API 文档与调试</span>
+          <span class="nav-tag" style="background:rgba(16,185,129,0.2); color:#34d399;">13接口</span>
         </button>
       </li>
       <li>
@@ -70,7 +76,7 @@
 
     <div class="sidebar-footer">
       <div><strong>合规标准：</strong>GB/T 45654-2025</div>
-      <div style="margin-top:3px;"><strong>引擎版本：</strong>Qwen3Guard v2.6 Enterprise</div>
+      <div style="margin-top:3px;"><strong>引擎版本：</strong>Qwen3Guard v2.7 Enterprise</div>
       <div style="margin-top:6px;"><a href="/docs" target="_blank" style="color:var(--primary); text-decoration:none;">↗ 打开 Swagger OpenAPI 文档</a></div>
     </div>
   </aside>
@@ -140,10 +146,10 @@
             </div>
             <div id="dash-network-list" style="margin-bottom:14px;"></div>
             <div class="btn-group">
-              <button class="btn" onclick="navTo('view-audit', 4)">🔍 进入安全审计与Key溯源系统</button>
-              <button class="btn secondary" onclick="navTo('view-qbank', 1)">📚 题库管理</button>
-              <button class="btn secondary" onclick="navTo('view-gateway', 3)">🔌 API Key 配置</button>
-              <button class="btn secondary" onclick="navTo('view-reports', 5)">📑 查看评估总报告</button>
+              <button class="btn" onclick="navTo('view-api-portal')">📘 进入 REST API 接入文档与动态调试台</button>
+              <button class="btn safe" onclick="navTo('view-audit')">🔍 安全审计与Key溯源</button>
+              <button class="btn secondary" onclick="navTo('view-gateway')">🔌 API Key 网关配置</button>
+              <button class="btn secondary" onclick="navTo('view-reports')">📑 评估总报告</button>
             </div>
           </div>
         </div>
@@ -556,10 +562,13 @@
         <div class="card">
           <div class="card-header">
             <div>
-              <h3>🧭 六大安全 API 接口核心区别、适用场景与出入参契约全景对比</h3>
+              <h3>🧭 八大核心安全 REST API 接口区别、适用场景与出入参契约全景对比</h3>
               <p style="font-size:12px; color:var(--text-muted); margin-top:3px;">
-                不同业务架构（旁路审计、网关前置/后置插件、流式数字人、OpenAI SDK 零改造替换、批量内容巡检）应选择对应的专属接口。点击任意接口行右侧按钮可一键生成代码或跳转实测。
+                不同业务架构（旁路审计、网关前置/后置插件、流式数字人、OpenAI SDK 零改造替换、高并发批量巡检、反混淆脱敏）应选择对应的专属接口。点击右侧<strong>「🛠️ 独立调试&文档」</strong>可打开该接口专属的动态调试台与完整接入规范。
               </p>
+            </div>
+            <div class="btn-group">
+              <button class="btn" onclick="navTo('view-api-portal')">📘 打开全平台 REST API 接入文档与动态调试中心 (13个接口) ↗</button>
             </div>
           </div>
           <div class="table-wrap">
@@ -572,21 +581,21 @@
                   <th style="width:220px;">核心入参区别 (Request)</th>
                   <th style="width:230px;">核心出参区别 (Response)</th>
                   <th>典型业务场景与具体例子</th>
-                  <th style="width:135px;">快捷操作</th>
+                  <th style="width:195px;">独立调试页 / 例子 / 代码</th>
                 </tr>
               </thead>
               <tbody>
                 <tr>
                   <td><code>POST /v1/guard/detect</code><br/><span class="badge safe">旗舰全维接口</span></td>
-                  <td><strong>全维深度归因</strong><br/><span style="font-size:11.5px; color:var(--text-muted);">单轮/多轮全量分析</span></td>
+                  <td><strong>全维深度归因</strong><br/><span style="font-size:11.5px; color:var(--text-muted);">单轮/双轨全量分析</span></td>
                   <td><code>Qwen3Guard-Gen</code><br/>+ 反混淆 + TC260引擎<br/>(+可选 <code>Stream</code>)</td>
                   <td><code>{"prompt": "...", "response": "...", "include_stream_tokens": false}</code></td>
                   <td>返回最完整的 <code>tc260</code>(31子类)、<code>security_shield</code>(反混淆原文/攻击手法/PII)、<code>qwen_guard_gen</code></td>
                   <td style="font-size:12px;">需要拿到完整 TC260 国标归类编码（如 <code>A.2.5 性别歧视</code>）、反混淆拆包还原文本、具体越狱手法标签的风控中台。</td>
                   <td>
                     <div class="btn-group">
-                      <button class="btn sm" onclick="jumpToEndpointDemo('/v1/guard/detect')">🚀 实测例子</button>
-                      <button class="btn secondary sm" onclick="selectSDKEndpoint('detect')">💻 代码</button>
+                      <button class="btn sm" onclick="openApiPortalFor('/v1/guard/detect')">🛠️ 调试&文档</button>
+                      <button class="btn secondary sm" onclick="jumpToEndpointDemo('/v1/guard/detect')">🚀 例子</button>
                     </div>
                   </td>
                 </tr>
@@ -599,8 +608,8 @@
                   <td style="font-size:12px;">部署在 API 网关（Kong/Nginx/Dify）前置钩子：用户发来带符号干扰或越狱指令时，在消耗大模型算力前直接拦截或返回净化文本。</td>
                   <td>
                     <div class="btn-group">
-                      <button class="btn sm" onclick="jumpToEndpointDemo('/v1/guard/input')">🚀 实测例子</button>
-                      <button class="btn secondary sm" onclick="selectSDKEndpoint('input')">💻 代码</button>
+                      <button class="btn sm" onclick="openApiPortalFor('/v1/guard/input')">🛠️ 调试&文档</button>
+                      <button class="btn secondary sm" onclick="jumpToEndpointDemo('/v1/guard/input')">🚀 例子</button>
                     </div>
                   </td>
                 </tr>
@@ -613,8 +622,8 @@
                   <td style="font-size:12px;">用户提问看似正常（如“如何快速吸引散户资金”），但大模型生成了违法操纵股价或泄露内幕信息时，在返回给前端前拦截并替换为合规话术。</td>
                   <td>
                     <div class="btn-group">
-                      <button class="btn sm" onclick="jumpToEndpointDemo('/v1/guard/output')">🚀 实测例子</button>
-                      <button class="btn secondary sm" onclick="selectSDKEndpoint('output')">💻 代码</button>
+                      <button class="btn sm" onclick="openApiPortalFor('/v1/guard/output')">🛠️ 调试&文档</button>
+                      <button class="btn secondary sm" onclick="jumpToEndpointDemo('/v1/guard/output')">🚀 例子</button>
                     </div>
                   </td>
                 </tr>
@@ -627,8 +636,8 @@
                   <td style="font-size:12px;">数字人播报或流式打字机场景：模型前 18 个 Token 还在讲安全食盐实验，第 19 个 Token 开始输出炸药配比时，当场毫秒级切断流，只下发前半段安全文本。</td>
                   <td>
                     <div class="btn-group">
-                      <button class="btn sm" onclick="jumpToEndpointDemo('/v1/guard/stream')">🚀 实测例子</button>
-                      <button class="btn secondary sm" onclick="selectSDKEndpoint('stream')">💻 代码</button>
+                      <button class="btn sm" onclick="openApiPortalFor('/v1/guard/stream')">🛠️ 调试&文档</button>
+                      <button class="btn secondary sm" onclick="openApiPortalFor('/v1/guard/stream/sse')">📡 SSE调试</button>
                     </div>
                   </td>
                 </tr>
@@ -641,22 +650,50 @@
                   <td style="font-size:12px;">现有业务使用 OpenAI SDK / LangChain，只需把 <code>base_url</code> 指向本服务，无需改业务代码即可自动获得 Input+Stream+Output 三阶围栏保护。</td>
                   <td>
                     <div class="btn-group">
-                      <button class="btn sm" onclick="jumpToEndpointDemo('/v1/chat/completions')">🚀 实测例子</button>
-                      <button class="btn secondary sm" onclick="selectSDKEndpoint('chat')">💻 代码</button>
+                      <button class="btn sm" onclick="openApiPortalFor('/v1/chat/completions')">🛠️ 调试&文档</button>
+                      <button class="btn secondary sm" onclick="jumpToEndpointDemo('/v1/chat/completions')">🚀 例子</button>
                     </div>
                   </td>
                 </tr>
                 <tr>
                   <td><code>POST /v1/moderations</code><br/><span class="badge info">OpenAI批量审核</span></td>
-                  <td><strong>批量内容审核</strong><br/><span style="font-size:11.5px; color:var(--text-muted);">单条或数组批量巡检</span></td>
+                  <td><strong>标准协议平替</strong><br/><span style="font-size:11.5px; color:var(--text-muted);">单条或数组批量巡检</span></td>
                   <td><code>Qwen3Guard-Gen</code><br/>+ TC260 映射</td>
                   <td><code>{"input": ["文本1", "文本2", ...]}</code><br/><span style="font-size:11px; color:var(--text-muted);">支持字符串或数组批量提交</span></td>
                   <td>兼容 OpenAI Moderations 的 <code>results: [{"flagged": true, "categories": ...}]</code> 数组</td>
                   <td style="font-size:12px;">评论区、知识库文档分块、历史对话日志批量合规扫描，一次 HTTP 请求并发审核多条文本。</td>
                   <td>
                     <div class="btn-group">
-                      <button class="btn sm" onclick="jumpToEndpointDemo('/v1/moderations')">🚀 实测例子</button>
-                      <button class="btn secondary sm" onclick="selectSDKEndpoint('moderations')">💻 代码</button>
+                      <button class="btn sm" onclick="openApiPortalFor('/v1/moderations')">🛠️ 调试&文档</button>
+                      <button class="btn secondary sm" onclick="jumpToEndpointDemo('/v1/moderations')">🚀 例子</button>
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td><code>POST /v1/guard/batch</code><br/><span class="badge purple">企业批量检测</span></td>
+                  <td><strong>高吞吐并发巡检</strong><br/><span style="font-size:11.5px; color:var(--text-muted);">带业务ID多条联检</span></td>
+                  <td><code>Qwen3Guard-Gen</code><br/>+ 批量汇总统计</td>
+                  <td><code>{"items": [{"id": "msg-1", "prompt": "...", "response": "..."}]}</code></td>
+                  <td>返回汇总统计 <code>summary: {total, safe_count, unsafe_count, block_rate_pct}</code> 与逐条明细 <code>results</code></td>
+                  <td style="font-size:12px;">企业语料库清洗、RAG 知识切片入库前批量合规筛查，支持携带业务自定义主键 <code>id</code> 对齐结果。</td>
+                  <td>
+                    <div class="btn-group">
+                      <button class="btn sm" onclick="openApiPortalFor('/v1/guard/batch')">🛠️ 调试&文档</button>
+                      <button class="btn secondary sm" onclick="selectSDKEndpoint('batch')">💻 代码</button>
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td><code>POST /v1/guard/deobfuscate</code><br/><span class="badge warn">反混淆与PII脱敏</span></td>
+                  <td><strong>前置安全拆包脱敏</strong><br/><span style="font-size:11.5px; color:var(--text-muted);">解码还原 + 隐私掩码</span></td>
+                  <td>反混淆拆包引擎<br/>+ PII 识别掩码器</td>
+                  <td><code>{"text": "...", "mask_pii": true}</code></td>
+                  <td>返回解码还原明文 <code>deobfuscated_text</code>、脱敏后文本 <code>masked_text</code>、识别出的隐私实体 <code>pii_entities</code></td>
+                  <td style="font-size:12px;">需要把用户输入中的身份证/手机号/密钥自动打码（如 <code>139****4321</code>）或将 Base64/结巴混淆指令还原成明文后再交由下游系统处理。</td>
+                  <td>
+                    <div class="btn-group">
+                      <button class="btn sm" onclick="openApiPortalFor('/v1/guard/deobfuscate')">🛠️ 调试&文档</button>
+                      <button class="btn secondary sm" onclick="selectSDKEndpoint('deobfuscate')">💻 代码</button>
                     </div>
                   </td>
                 </tr>
@@ -679,6 +716,8 @@
                 <option value="stream">POST /v1/guard/stream/sse (第二道防线:流式熔断)</option>
                 <option value="chat">POST /v1/chat/completions (OpenAI全链路安全对话)</option>
                 <option value="moderations">POST /v1/moderations (OpenAI批量数组内容审核)</option>
+                <option value="batch">POST /v1/guard/batch (企业级批量并发检测)</option>
+                <option value="deobfuscate">POST /v1/guard/deobfuscate (反混淆拆包与PII脱敏)</option>
               </select>
               <button class="btn secondary sm" onclick="copySDKCode()">📋 复制接入代码</button>
             </div>
@@ -693,6 +732,159 @@
           </div>
 
           <pre id="sdk-code-box" class="mono" style="min-height:200px;"></pre>
+        </div>
+      </section>
+
+      <!-- =====================================================================
+           VIEW 4.5: REST API DEVELOPER PORTAL & INTERACTIVE PLAYGROUND
+           (REST API 平台级接口服务：逐接口接入文档介绍与动态在线调试中心)
+           ===================================================================== -->
+      <section id="view-api-portal" class="view-pane">
+        <!-- Top Global Gateway Environment & Auth Toolbar -->
+        <div class="card" style="padding:14px 18px; margin-bottom:16px; border-color:rgba(59,130,246,0.45);">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+            <div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <h3 style="margin:0; font-size:15.5px;">📘 Qwen3Guard 平台级 REST API 开放中心 & 动态交互调试台</h3>
+                <span class="badge safe">OpenAPI 3.1 / RESTful 规范</span>
+                <span class="badge info">全接口支持 API Key 鉴权与实时审计归档</span>
+              </div>
+              <p style="font-size:12px; color:var(--text-muted); margin-top:4px;">
+                从左侧目录选择任意对外 API 接口，即可在<strong>左侧查阅完整接入文档（架构定位、请求头、入参/出参字典、状态码与5语言实时代码）</strong>，并在<strong>右侧动态调试台</strong>直接修改表单或 JSON 参数发起真实调用。
+              </p>
+            </div>
+            <div class="btn-group">
+              <a href="/v1/platform/catalog" target="_blank" class="btn secondary sm" style="text-decoration:none;">📦 查看平台 API 元数据 JSON</a>
+              <a href="/docs" target="_blank" class="btn secondary sm" style="text-decoration:none;">↗ 原生 Swagger UI</a>
+            </div>
+          </div>
+
+          <div style="display:grid; grid-template-columns:1.1fr 1.3fr 1fr 1.1fr; gap:12px; margin-top:12px; padding-top:12px; border-top:1px solid var(--border);">
+            <div>
+              <label style="margin-top:0; font-size:11.5px;">🌐 目标网关节点 (`Base URL`)</label>
+              <select id="ap-base-url" onchange="onApiPortalEnvChange()"></select>
+            </div>
+            <div>
+              <label style="margin-top:0; font-size:11.5px;">🔑 调试调用凭证 (`API Key` — 自动计入该 Key 审计账本)</label>
+              <select id="ap-api-key" onchange="onApiPortalEnvChange()"></select>
+            </div>
+            <div>
+              <label style="margin-top:0; font-size:11.5px;">🛡️ HTTP 鉴权头传递方式 (`Auth Header Mode`)</label>
+              <select id="ap-auth-mode" onchange="onApiPortalEnvChange()">
+                <option value="both">标准双头: Authorization Bearer + X-API-Key (推荐)</option>
+                <option value="bearer">仅 Authorization: Bearer &lt;API_KEY&gt;</option>
+                <option value="x-api-key">仅 X-API-Key: &lt;API_KEY&gt;</option>
+              </select>
+            </div>
+            <div>
+              <label style="margin-top:0; font-size:11.5px;">📡 平台公共响应头 (`Enterprise Gateway Headers`)</label>
+              <div style="font-size:11.5px; color:#93c5fd; background:rgba(15,23,42,0.7); border:1px solid var(--border); border-radius:7px; padding:7px 10px; font-family:monospace;">
+                X-Request-Id | X-Process-Time-Ms | X-Guard-Version
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Split Layout: Left API Catalog Tree + Right Split Doc & Live Playground -->
+        <div class="api-portal-layout">
+          <!-- Left: 13 REST APIs Directory -->
+          <div class="api-catalog-sidebar">
+            <div style="font-weight:700; font-size:13.5px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+              <span>🗂️ 对外开放 API 目录</span>
+              <span class="badge info" id="ap-catalog-count">13 个接口</span>
+            </div>
+            <input type="text" id="ap-search-input" placeholder="🔎 搜索路径或接口名称..." oninput="renderApiPortalSidebar()" style="margin-bottom:8px; padding:6px 10px; font-size:12px;" />
+            <div id="ap-catalog-list"></div>
+          </div>
+
+          <!-- Right: Documentation + Interactive Live Debugger -->
+          <div class="api-split-workspace">
+            <!-- Column 1: Comprehensive Integration Documentation for Selected API -->
+            <div class="card" id="ap-doc-card" style="margin-bottom:0;">
+              <div id="ap-doc-content">正在加载接口接入文档...</div>
+            </div>
+
+            <!-- Column 2: Interactive Live API Debugger / Playground -->
+            <div class="card" id="ap-debug-card" style="margin-bottom:0; border-color:rgba(16,185,129,0.45); position:sticky; top:14px;">
+              <div class="card-header" style="margin-bottom:10px;">
+                <div>
+                  <h3 style="display:flex; align-items:center; gap:8px;">
+                    <span>⚡ 接口动态在线调试台 (Live API Debugger)</span>
+                    <span class="badge safe" id="ap-dbg-stage-badge">实时真机调用</span>
+                  </h3>
+                  <p style="font-size:11.5px; color:var(--text-muted); margin-top:2px;">
+                    支持可视化表单调参与 Raw JSON 编辑双向同步，每次调用真实经过 GPU 推理并自动生成可追溯 `audit_id`。
+                  </p>
+                </div>
+              </div>
+
+              <!-- URL Bar & Send Action -->
+              <div class="api-url-bar" style="margin-bottom:12px;">
+                <span id="ap-dbg-method" class="http-method POST">POST</span>
+                <span id="ap-dbg-full-url" style="flex:1; color:#e2e8f0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">http://127.0.0.1:8092/v1/guard/detect</span>
+                <button class="btn secondary sm" onclick="copyCurrentApiUrl()" title="复制完整接口URL">📋 复制URL</button>
+                <button class="btn safe sm" id="ap-send-btn" onclick="executeApiPortalRequest()" style="padding:6px 14px; font-size:12.5px;">🚀 发送请求 (Send)</button>
+              </div>
+
+              <!-- Quick Preset Buttons for this Specific API -->
+              <div style="margin-bottom:12px;">
+                <div style="font-size:11.5px; font-weight:700; color:var(--text-muted); margin-bottom:6px;">
+                  🎯 当前接口专属调试用例一键载入 (点击切换不同测试输入)：
+                </div>
+                <div id="ap-preset-buttons" class="btn-group" style="flex-wrap:wrap;"></div>
+              </div>
+
+              <!-- Parameter Editor Mode Switcher (Visual Form vs Raw JSON) -->
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <div class="subnav" style="margin-bottom:0;">
+                  <button class="subnav-btn active" id="ap-mode-form-btn" onclick="switchApiParamMode('form')">🎛️ 可视化表单调参 (Form)</button>
+                  <button class="subnav-btn" id="ap-mode-json-btn" onclick="switchApiParamMode('json')">{ } Raw JSON / Query 源码编辑</button>
+                </div>
+                <button class="btn secondary sm" onclick="formatApiJsonEditor()" style="padding:3px 8px; font-size:11px;">✨ 格式化 JSON</button>
+              </div>
+
+              <!-- Visual Form Builder Pane -->
+              <div id="ap-form-pane" style="background:rgba(10,16,32,0.65); border:1px solid var(--border); border-radius:9px; padding:12px; margin-bottom:12px;">
+                <div id="ap-form-builder"></div>
+              </div>
+
+              <!-- Raw JSON / Query Editor Pane -->
+              <div id="ap-json-pane" style="display:none; margin-bottom:12px;">
+                <textarea id="ap-json-editor" rows="8" class="mono" oninput="onApiJsonEditorInput()" style="font-family:monospace; font-size:12px; width:100%;"></textarea>
+              </div>
+
+              <!-- Live Response Inspector -->
+              <div style="border-top:1px solid var(--border); padding-top:12px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:8px;">
+                  <div style="font-weight:700; font-size:13px;">📡 实时响应检视器 (Response Inspector)</div>
+                  <div id="ap-res-meta" style="display:flex; align-items:center; gap:6px; font-size:11.5px;">
+                    <span class="badge info">等待发送请求...</span>
+                  </div>
+                </div>
+
+                <div class="subnav" style="margin-bottom:8px;">
+                  <button class="subnav-btn active" id="ap-rtab-visual" onclick="switchApiResTab('visual')">🎯 可视化解析视图</button>
+                  <button class="subnav-btn" id="ap-rtab-raw" onclick="switchApiResTab('raw')">📄 响应体 JSON / SSE 流</button>
+                  <button class="subnav-btn" id="ap-rtab-headers" onclick="switchApiResTab('headers')">🛡️ 网关响应头 & 请求报文</button>
+                </div>
+
+                <div id="ap-res-visual-pane" style="background:rgba(10,16,32,0.75); border:1px solid var(--border); border-radius:9px; padding:12px; min-height:170px; max-height:420px; overflow-y:auto;">
+                  <div style="color:var(--text-muted); font-size:12.5px; text-align:center; padding:36px 12px;">
+                    点击上方 <strong>「🚀 发送请求 (Send)」</strong> 或任一<strong>专属调试用例按钮</strong>，在此实时查看接口返回的可视化安全归因、流式截断位点或数据列表。
+                  </div>
+                </div>
+
+                <div id="ap-res-raw-pane" style="display:none; position:relative;">
+                  <button class="btn secondary sm" onclick="copyApiPortalResponse()" style="position:absolute; right:10px; top:10px; padding:3px 8px; font-size:11px;">📋 复制 JSON</button>
+                  <pre id="ap-res-raw-box" class="mono" style="min-height:170px; max-height:420px; overflow-y:auto; margin:0; font-size:11.5px;">// 等待发送请求...</pre>
+                </div>
+
+                <div id="ap-res-headers-pane" style="display:none;">
+                  <pre id="ap-res-headers-box" class="mono" style="min-height:170px; max-height:420px; overflow-y:auto; margin:0; font-size:11.5px;">// 网关响应头 (Response Headers) 与实际发送请求报文将在此显示...</pre>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -1374,6 +1566,6 @@
     </div>
   </div>
 
-  <script src="/static/app.js?v=2.6.3"></script>
+  <script src="/static/app.js?v=2.7.0"></script>
 </body>
 </html>

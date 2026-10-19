@@ -154,8 +154,22 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Request-Id", "X-Guard-Version", "X-Process-Time-Ms", "X-Compliance-Standard"],
 )
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+@app.middleware("http")
+async def add_enterprise_gateway_headers(request: Request, call_next):
+    t0 = time.perf_counter()
+    req_id = f"req-{int(time.time()*1000)}-{os.urandom(3).hex()}"
+    response = await call_next(request)
+    elapsed_ms = round((time.perf_counter() - t0) * 1000, 2)
+    response.headers["X-Request-Id"] = req_id
+    response.headers["X-Guard-Version"] = "Qwen3Guard-Enterprise-v2.7.0"
+    response.headers["X-Process-Time-Ms"] = str(elapsed_ms)
+    response.headers["X-Compliance-Standard"] = "GB/T-45654-2025-TC260-003"
+    return response
 
 
 # -------------------- Request Schemas --------------------
@@ -163,6 +177,23 @@ class GuardDetectRequest(BaseModel):
     prompt: str = Field(..., description="User input text to inspect")
     response: Optional[str] = Field(default=None, description="Optional assistant response text to inspect")
     include_stream_tokens: bool = Field(default=False, description="Also run Qwen3Guard-Stream token-level analysis")
+    api_key: Optional[str] = Field(default=None, description="Optional API key token or ID override")
+
+
+class BatchGuardItem(BaseModel):
+    id: Optional[str] = Field(default=None, description="Caller custom item ID")
+    prompt: str = Field(..., description="User input text to inspect")
+    response: Optional[str] = Field(default=None, description="Optional assistant response text")
+
+
+class BatchGuardRequest(BaseModel):
+    items: List[BatchGuardItem] = Field(..., description="List of items for batch moderation (up to 50 per call)")
+    api_key: Optional[str] = Field(default=None, description="Optional API key token or ID override")
+
+
+class DeobfuscateRequest(BaseModel):
+    text: str = Field(..., description="Text potentially containing Base64/Hex/Leetspeak/Zero-width/PII")
+    mask_pii: bool = Field(default=True, description="Whether to return masked PII text")
     api_key: Optional[str] = Field(default=None, description="Optional API key token or ID override")
 
 
@@ -421,6 +452,140 @@ async def openai_moderations(req: ModerationsRequest, request: Request):
         "model": req.model,
         "api_key": {"id": key_obj["id"], "name": key_obj["name"], "prefix": key_obj["prefix"]},
         "results": results,
+    }
+
+
+@app.post("/v1/guard/batch")
+async def guard_batch_detect(req: BatchGuardRequest, request: Request):
+    """Enterprise high-throughput batch content moderation REST API."""
+    t0 = time.perf_counter()
+    key_obj = resolve_request_key(request, req.api_key)
+    eff_cfg = get_effective_config_for_key(key_obj)
+    items = req.items[:50]
+    results = []
+    safe_cnt = 0
+    unsafe_cnt = 0
+    for idx, item in enumerate(items):
+        det = model_manager.detect_with_gen(prompt=item.prompt, response=item.response, cfg=eff_cfg)
+        audit_entry = record_full_audit(
+            request=request,
+            api_key_obj=key_obj,
+            event_type="guard_batch",
+            prompt=item.prompt,
+            response=item.response,
+            result=det,
+        )
+        if det["is_safe"]:
+            safe_cnt += 1
+        else:
+            unsafe_cnt += 1
+        results.append(
+            {
+                "id": item.id or f"item-{idx + 1}",
+                "audit_id": audit_entry["audit_id"],
+                "is_safe": det["is_safe"],
+                "action": det["action"],
+                "risk_level": det["risk_level"],
+                "risk_score": det["risk_score"],
+                "tc260": det["tc260"],
+                "attack_methods": det["security_shield"]["attack_methods"],
+                "pii_entities": det["security_shield"]["pii_entities"],
+                "latency_ms": det["latency_ms"],
+            }
+        )
+    total = len(results)
+    return {
+        "batch_id": f"batch-{int(time.time()*1000)}",
+        "api_key": {"id": key_obj["id"], "name": key_obj["name"], "prefix": key_obj["prefix"]},
+        "summary": {
+            "total": total,
+            "safe_count": safe_cnt,
+            "unsafe_count": unsafe_cnt,
+            "block_rate_pct": round(unsafe_cnt / max(total, 1) * 100, 2),
+            "total_latency_ms": round((time.perf_counter() - t0) * 1000, 2),
+        },
+        "results": results,
+    }
+
+
+@app.post("/v1/guard/deobfuscate")
+async def guard_deobfuscate(req: DeobfuscateRequest, request: Request):
+    """Dedicated REST API for de-obfuscating Base64/stuttering/fill-in-blank payloads and masking sensitive PII."""
+    import re as _re
+
+    t0 = time.perf_counter()
+    key_obj = resolve_request_key(request, req.api_key)
+    eff_cfg = get_effective_config_for_key(key_obj)
+    deobf_text, obf_attacks = security_shield.deobfuscate_and_unwrap(req.text)
+    pii_entities = security_shield.detect_pii(deobf_text)
+    masked_text = req.text
+    if req.mask_pii:
+        masked_text = _re.sub(
+            r"\b([1-9]\d{5})(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}([\dXx])\b",
+            r"\1**********\2",
+            masked_text,
+        )
+        masked_text = _re.sub(r"\b(1[3-9]\d)\d{4}(\d{4})\b", r"\1****\2", masked_text)
+        masked_text = _re.sub(r"\b(sk-[a-zA-Z0-9]{4})[a-zA-Z0-9]{12,}([a-zA-Z0-9]{4})\b", r"\1****\2", masked_text)
+
+    det = model_manager.detect_with_gen(prompt=req.text, response=None, cfg=eff_cfg)
+    audit_entry = record_full_audit(
+        request=request,
+        api_key_obj=key_obj,
+        event_type="guard_deobfuscate",
+        prompt=req.text,
+        response=None,
+        result=det,
+    )
+    return {
+        "audit_id": audit_entry["audit_id"],
+        "api_key": {"id": key_obj["id"], "name": key_obj["name"], "prefix": key_obj["prefix"]},
+        "original_text": req.text,
+        "deobfuscated_text": deobf_text,
+        "obfuscation_detected": len(obf_attacks) > 0 or deobf_text != req.text,
+        "detected_attack_methods": det["security_shield"]["attack_methods"],
+        "pii_detected": len(pii_entities) > 0,
+        "pii_entities": pii_entities,
+        "masked_text": masked_text,
+        "is_safe": det["is_safe"],
+        "risk_score": det["risk_score"],
+        "tc260": det["tc260"],
+        "latency_ms": round((time.perf_counter() - t0) * 1000, 2),
+    }
+
+
+@app.get("/v1/platform/catalog")
+@app.get("/api/v1/catalog")
+async def get_platform_api_catalog():
+    """Return structured metadata and schemas for all platform REST APIs."""
+    port = int(os.environ.get("PORT", "8092"))
+    lan_ips = get_lan_ips()
+    return {
+        "platform": "Qwen3Guard Enterprise Security & TC260 Compliance REST API Platform",
+        "version": "2.7.0",
+        "standard": "GB/T 45654-2025 / TC260-003",
+        "base_urls": [f"http://{ip}:{port}" for ip in lan_ips] + [f"http://127.0.0.1:{port}"],
+        "authentication": {
+            "supported_headers": [
+                {"header": "Authorization", "format": "Bearer <qg-live-api-key>", "recommended": True},
+                {"header": "X-API-Key", "format": "<qg-live-api-key>", "recommended": True},
+                {"header": "X-API-Key-Id", "format": "<key-id>", "recommended": False},
+            ],
+            "body_parameter": "api_key",
+        },
+        "response_headers": [
+            {"header": "X-Request-Id", "description": "全局唯一请求追踪单号"},
+            {"header": "X-Process-Time-Ms", "description": "网关端到端处理耗时 (毫秒)"},
+            {"header": "X-Guard-Version", "description": "安全围栏引擎版本标识"},
+            {"header": "X-Compliance-Standard", "description": "遵循的国家合规标准编号"},
+        ],
+        "error_codes": [
+            {"http_status": 200, "code": "OK", "description": "请求成功处理（安全放行或违规拦截均通过 JSON 响应体中的 is_safe/allowed 字段返回）"},
+            {"http_status": 401, "code": "UNAUTHORIZED", "description": "开启强制鉴权模式下未提供有效的 API Key"},
+            {"http_status": 403, "code": "KEY_DISABLED", "description": "所提供的业务 API Key 已被管理员禁用冻结"},
+            {"http_status": 422, "code": "VALIDATION_ERROR", "description": "请求体 JSON 格式错误或缺少必填字段"},
+            {"http_status": 429, "code": "RATE_LIMIT_EXCEEDED", "description": "超出当前 API Key 配置的 QPS 限流配额"},
+        ],
     }
 
 

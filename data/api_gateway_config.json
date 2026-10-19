@@ -22,6 +22,20 @@
   },
   "api_keys": [
     {
+      "id": "key_1792396401390",
+      "name": "政务服务大厅智能问答 (Gov-Portal)",
+      "prefix": "qg-live-5eef...bc76",
+      "token": "qg-live-5eef90cc76c23cc2f8bca97daf43bc76",
+      "policy_preset": "finance_gov_strict",
+      "qps_limit": 150,
+      "enabled": true,
+      "created_at": "2026-10-19 07:53:21",
+      "calls": 2,
+      "safe_calls": 1,
+      "blocked_calls": 1,
+      "last_used_at": "2026-10-19 07:53:27"
+    },
+    {
       "id": "key_prod_cs",
       "name": "智能客服生产网关 (Prod-CustomerService)",
       "prefix": "qg-live-9f8a...3c1b",
@@ -30,7 +44,10 @@
       "qps_limit": 80,
       "enabled": true,
       "created_at": "2026-10-18 10:00:00",
-      "calls": 1420
+      "calls": 3,
+      "safe_calls": 1,
+      "blocked_calls": 2,
+      "last_used_at": "2026-10-19 07:52:55"
     },
     {
       "id": "key_fin_core",
@@ -41,7 +58,10 @@
       "qps_limit": 50,
       "enabled": true,
       "created_at": "2026-10-18 11:30:00",
-      "calls": 386
+      "calls": 3,
+      "safe_calls": 1,
+      "blocked_calls": 2,
+      "last_used_at": "2026-10-19 07:52:55"
     },
     {
       "id": "key_sec_eval",
@@ -52,7 +72,10 @@
       "qps_limit": 200,
       "enabled": true,
       "created_at": "2026-10-18 12:00:00",
-      "calls": 168
+      "calls": 3,
+      "safe_calls": 0,
+      "blocked_calls": 3,
+      "last_used_at": "2026-10-19 07:52:55"
     }
   ]
 }

@@ -1287,16 +1287,16 @@ async function openAuditDetailModal(auditId) {
       </div>
     </div>
 
-    <label>📥 请求完整输入内容 (`Prompt` 原文)</label>
+    <label>📥 请求完整输入内容 (<code>Prompt</code> 原文)</label>
     <pre>${escapeHtml(e.prompt || '(空)')}</pre>
 
     ${e.deobfuscated_text ? `
-      <label style="color:#fcd34d;">🔣 反混淆引擎拆包还原后文本 (`deobfuscated_text`)</label>
+      <label style="color:#fcd34d;">🔣 反混淆引擎拆包还原后文本 (<code>deobfuscated_text</code>)</label>
       <pre style="border-color:rgba(245,158,11,0.5); color:#fde68a;">${escapeHtml(e.deobfuscated_text)}</pre>
     ` : ''}
 
     ${e.response ? `
-      <label>📤 待审核/模型生成响应内容 (`Response` 原文)</label>
+      <label>📤 待审核/模型生成响应内容 (<code>Response</code> 原文)</label>
       <pre>${escapeHtml(e.response)}</pre>
     ` : ''}
 

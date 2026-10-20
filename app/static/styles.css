@@ -666,3 +666,173 @@ pre {
   cursor: pointer;
 }
 .chip:hover { border-color: var(--primary); color: #93c5fd; }
+
+/* API Key Audit Account Cards */
+.key-audit-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(265px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.key-audit-card {
+  background: var(--bg-card-alt);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 13px 15px;
+  cursor: pointer;
+  transition: all 0.16s ease;
+  position: relative;
+}
+
+.key-audit-card:hover {
+  border-color: var(--primary);
+  transform: translateY(-1px);
+}
+
+.key-audit-card.active {
+  border-color: var(--primary);
+  background: rgba(59, 130, 246, 0.13);
+  box-shadow: 0 0 0 1px var(--primary);
+}
+
+.audit-content-cell {
+  max-width: 440px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.audit-prompt-box {
+  background: rgba(10, 16, 32, 0.65);
+  border: 1px solid rgba(34, 48, 89, 0.8);
+  border-radius: 7px;
+  padding: 7px 10px;
+  margin-bottom: 5px;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.audit-resp-box {
+  background: rgba(16, 185, 129, 0.07);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  border-radius: 7px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: #cbd5e1;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+/* REST API Developer Portal & Interactive Playground */
+.api-portal-layout {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.api-catalog-sidebar {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  position: sticky;
+  top: 14px;
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
+}
+
+.api-group-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-muted);
+  margin: 12px 0 6px 4px;
+}
+
+.api-nav-item {
+  width: 100%;
+  text-align: left;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(34, 48, 89, 0.7);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  color: var(--text-main);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.api-nav-item:hover {
+  border-color: var(--primary);
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.api-nav-item.active {
+  border-color: var(--primary);
+  background: rgba(59, 130, 246, 0.18);
+  box-shadow: 0 0 0 1px var(--primary);
+}
+
+.http-method {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  font-weight: 800;
+  font-family: "JetBrains Mono", Consolas, monospace;
+  letter-spacing: 0.4px;
+}
+
+.http-method.POST { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.45); }
+.http-method.GET { background: rgba(59, 130, 246, 0.2); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.45); }
+.http-method.PUT { background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.45); }
+.http-method.DELETE { background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.45); }
+
+.api-split-workspace {
+  display: grid;
+  grid-template-columns: 1.15fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 1360px) {
+  .api-split-workspace {
+    grid-template-columns: 1fr;
+  }
+}
+
+.api-url-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(7, 11, 22, 0.85);
+  border: 1px solid var(--border-light);
+  border-radius: 9px;
+  padding: 8px 12px;
+  font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: 13px;
+}
+
+.schema-badge-req {
+  color: #f87171;
+  font-weight: 700;
+  font-size: 11px;
+  background: rgba(239, 68, 68, 0.14);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.schema-badge-opt {
+  color: #94a3b8;
+  font-size: 11px;
+  background: rgba(148, 163, 184, 0.12);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+

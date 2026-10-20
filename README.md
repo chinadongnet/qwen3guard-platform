@@ -1,49 +1,45 @@
 # Qwen3Guard Platform (`qwen3guard-platform`)
 
-**企业级生成式 AI 安全治理、Token 级流式熔断与 TC260 (GB/T 45654-2025) 合规评测中台**
+**企业级生成式 AI 安全治理、Token 级流式熔断、REST API 开放平台、API Key 全链路审计溯源与 TC260 (GB/T 45654-2025) 合规评测中台 (v2.7 Enterprise)**
 
-基于 **Qwen3Guard-Gen-0.6B**、**Qwen3Guard-Stream-0.6B** 与 **Qwen3-0.6B** 构建的企业级安全围栏平台。提供从 **题库管理**、**提示词与参数联合 A/B 调测**、**API 网关与多语言接入配置**、**TC260 31 子类权威评估报告** 到 **实时流式熔断与动态大模型攻防演练** 的全生命周期合规治理能力。
+基于 **Qwen3Guard-Gen-0.6B**、**Qwen3Guard-Stream-0.6B** 与 **Qwen3-0.6B** 构建的企业级安全围栏平台。提供从 **TC260 题库管理**、**提示词与参数联合 A/B 调测**、**API 网关与密钥配额管理**、**REST API 开放平台（13 个接口逐一文档与动态在线调试台）**、**API Key 全链路内容级安全审计与总报告实时对账系统**、**TC260 31 子类权威评估报告** 到 **实时流式熔断与动态大模型攻防演练** 的全生命周期合规治理能力，并支持前后端全链路 **真实 URL 直达路由**（刷新不回退首页）。
 
 ---
 
-## ✨ 平台六大核心模块
+## 🔗 平台八大核心模块与真实直达 URL
 
-### 1. 📊 态势总览与监控中心 (Executive Dashboard)
-- **核心合规 KPI 大屏**：实时汇总 TC260 综合合规准确率、应拒答拦截召回率、非拒答正常样本通过率及动态大模型围栏净提升。
-- **TC260 五大类达标率态势图**：可视化展示 `A.1`～`A.5` 及 `BENIGN` 非拒答样本的评测分布。
-- **GPU 算力与模型集群监控**：实时监测 GPU 显存占用、三大常驻模型健康状态与实时安全审计日志流。
+| 模块名称 | 本机直达 URL | 功能定位 |
+| :--- | :--- | :--- |
+| **1. 📊 态势总览大屏** | `http://127.0.0.1:8092/dashboard` | 核心合规 KPI、TC260 五大类达标率、GPU 显存与实时审计流监控 |
+| **2. 📚 题库管理中心** | `http://127.0.0.1:8092/qbank` | 142 题精选库 / 1,607 题全量国标库切换、多维检索、CRUD、导入导出與批量 GPU 评测 |
+| **3. 🎛️ 提示词参数调测** | `http://127.0.0.1:8092/tuning` | 4 套行业策略预设、ChatML 安全提示词定制、多维权重滑块、Baseline vs Candidate 实时 A/B 对比 |
+| **4. 🔌 API 配置与网关** | `http://127.0.0.1:8092/gateway` | 业务 API Key 颁发与策略绑定、三阶围栏开关、PII 脱敏策略、8 大接口架构对比与 5 语言 SDK 生成 |
+| **5. 📘 REST API 文档与调试** | `http://127.0.0.1:8092/api-portal` | **13 个平台级 REST API** 逐接口接入文档、参数边界规范、表单/JSON 双向编辑与在线实时调试台（支持 `?api=/v1/guard/stream` 子路由直达） |
+| **6. 🔍 安全审计与Key溯源** | `http://127.0.0.1:8092/audit` | **按 API Key 穿透追溯每一次请求原文、待审回复、脱敏快照与审核结果**、6 大接口 18 个实战示例模拟器、人工复核加白/加黑与一键沉淀题库（支持 `?key=...` 子路由直达） |
+| **7. 📑 评估总报告中心** | `http://127.0.0.1:8092/reports` | 静态题库评测基准与**线上 API Key 实时审计账本秒级联动对账**、31 子类合规表、Markdown/PDF 导出 |
+| **8. 🛡️ 实时检测与攻防台** | `http://127.0.0.1:8092/inspector` | 深度上下文检测、`Qwen3Guard-Stream` 逐 Token 染色熔断可视化、`Qwen3-0.6B` 裸奔 vs 三阶护栏同屏对比 |
 
-### 2. 📚 TC260 合规题库管理中心 (Question Bank Management)
-- **双题库无缝切换**：
-  - `data/tc260_cases.json`：**142 题** 分层精选基准库（100% 覆盖 5 大类、31 小类与 18 种越狱/混淆攻击手法）。
-  - `data/tc260_full_1600.json`：**1,607 题** 全量国标合规题库。
-- **多维检索与分页**：支持按 TC260 大类/子类、题库分类（生成内容安全/应拒答/非拒答/行业拓展）、攻击手法与关键词实时检索。
-- **全量 CRUD 与导入导出**：支持在线新增、编辑、删除测试用例，支持 JSON 批量导入导出，以及勾选多题一键发起 GPU 批量评测。
+---
 
-### 3. 🎛️ 提示词与参数联合调测中心 (Prompt & Parameter Tuning Studio)
-- **4 套行业策略预设模板**：
-  1. `TC260-003 国标合规标准模式 (推荐)`
-  2. `政务/金融零容忍严苛防护模式`
-  3. `教育/学术/安全研发防误杀宽松模式`
-  4. `高并发流式极速熔断模式`
-- **结构化提示词工作台**：在线微调 `<BEGIN SAFETY POLICY>`（Input / Output 独立策略）、`<BEGIN UNSAFE CONTENT CATEGORIES>`、企业扩展规则与 `Qwen3-0.6B` 系统提示词，支持 ChatML 完整渲染预览。
-- **多维分类权重与阈值滑块**：支持调节全局风险阈值、Stream 熔断阈值及 `A.1`～`A.5`、`JAILBREAK/PII` 独立权重系数。
-- **Baseline vs Candidate 实时 A/B 对比调测沙箱**：在保存前并行对比“当前生效策略”与“待调测草稿策略”的拦截判定、风险分与规则命中差异。
+## 📘 平台级 REST API 接口矩阵与参数边界规范
 
-### 4. 🔌 API 网关与多语言接入配置 (API Gateway & SDK Center)
-- **业务接入密钥 (API Key) 管理**：颁发与管理多业务线 API Key，绑定专属合规预设模板与 QPS 配额。
-- **网关全局策略配置**：输入/流式/输出三阶围栏开关、PII 敏感信息处置策略（阻断/脱敏/仅审计）、上游大模型路由及 Webhook 告警。
-- **交互式多语言 SDK 生成器**：一键生成 **Python**、**cURL / PowerShell**、**Node.js**、**Go**、**Java** 生产级调用代码。
+所有接口均自动返回企业级网关标准响应头：`X-Request-Id`、`X-Process-Time-Ms`、`X-Guard-Version`、`X-Compliance-Standard`，并由 Pydantic 执行严格参数边界校验（越界返回标准 `HTTP 422`）：
 
-### 5. 📈 合规评测报告与安全审计中心 (Compliance Report & Audit Center)
-- **可视化合规审计看板**：混淆矩阵（`TP / TN / FP / FN`）、TC260 五大类达标率条形图、18 种越狱攻击手法拦截率条形图。
-- **权威明细报表**：31 个必测子类合规率明细表、`Qwen3Guard-Stream` Token 级流式熔断基准表、`Qwen3-0.6B` 裸奔 vs 围栏防护对比表。
-- **一键导出报告**：支持一键下载 Markdown 报告 (`/api/reports/export/markdown`) 或打印导出 PDF。
-
-### 6. 🛡️ 在线安全检测、流式熔断与攻防演练台 (Live Guard, Stream & LLM Arena)
-- **API 深度检测**：支持单轮/多轮上下文风险评分、TC260 子类归因与反混淆拆包还原。
-- **SSE 逐 Token 流式熔断可视化**：使用 `Qwen3Guard-Stream-0.6B` 分类头对每个生成 Token 实时打标染色，发现风险立即触发 `cutoff` 熔断截断。
-- **动态大模型同屏攻防对比**：直观对比 `Qwen3-0.6B` 裸奔输出与三阶围栏（Input → Stream → Output）防护输出。
+| 序号 | 接口路径 | 方法 | 适用场景与核心区别 | 关键参数边界限制 |
+| :--- | :--- | :--- | :--- | :--- |
+| 1 | `/v1/guard/detect` | `POST` | **全链路综合检测（主推）**：单次调用同时完成反混淆、18类越狱识别、PII 检测、`Qwen3Guard-Gen` 风险评分、TC260 31子类映射及可选 `Stream` 扫描 | `prompt`: `1 ~ 16,000` 字符（必填，禁纯空白）；`response`: `0 ~ 32,000` 字符；`history`: `0 ~ 50` 轮 |
+| 2 | `/v1/guard/input` | `POST` | **前置输入拦截护栏**：仅针对用户 Prompt 在进入大模型前做毫秒级首道防线（返回 `allowed` + `sanitized_text`） | `text`: `1 ~ 16,000` 字符（必填，禁纯空白）；`api_key`: `0 ~ 128` 字符 |
+| 3 | `/v1/guard/output` | `POST` | **后置生成内容复核护栏**：结合用户原始提问与模型生成草稿进行联合合规审计（精准识别“提问无害但诱导违规回复”） | `prompt`: `0 ~ 16,000` 字符；`text`: `1 ~ 32,000` 字符（必填，禁纯空白） |
+| 4 | `/v1/guard/stream` | `POST` | **Token 级流式熔断检测 (JSON)**：使用 `Qwen3Guard-Stream-0.6B` 对输出流逐词打分，返回首个违规截断位点 `cutoff_token_index` 与 `safe_prefix_text` | `prompt`: `0 ~ 16,000` 字符；`response`: `1 ~ 16,000` 字符（必填）；`chunk_delay_ms`: `0 ~ 500` ms |
+| 5 | `/v1/guard/stream/sse` | `POST` | **Token 级流式熔断推送 (`text/event-stream`)**：标准 SSE 实时事件流，逐帧推送 `event: token` 与最终 `event: summary` | 同 `/v1/guard/stream` |
+| 6 | `/v1/guard/batch` | `POST` | **高吞吐批量并发合规筛查**：单次请求并发检测多条语料，返回批次汇总指标与逐条结果 | `items`: 数组长度 `1 ~ 50` 条；单条 `prompt`: `1 ~ 8,000` 字符，`response`: `0 ~ 16,000` 字符 |
+| 7 | `/v1/guard/deobfuscate` | `POST` | **反混淆拆包与 PII 隐私脱敏工具**：无需跑大模型，纯 CPU <2ms 完成符号穿插还原、Base64/Hex 解码、谐音归一及身份证/手机号/银行卡掩码脱敏 | `text`: `1 ~ 32,000` 字符（必填）；`mask_pii`: `boolean` |
+| 8 | `/v1/chat/completions` | `POST` | **OpenAI 兼容三阶防护对话网关**：100% 兼容 OpenAI SDK，真实执行 `Input护栏 ➔ Qwen3-0.6B生成 ➔ Stream/Output护栏` 全闭环 | `messages`: `1 ~ 50` 条（单条 `1 ~ 16,000` 字符）；`max_tokens`: `1 ~ 512`；`temperature`: `0.0 ~ 2.0` |
+| 9 | `/v1/moderations` | `POST` | **OpenAI Moderations 标准审核平替**：零代码改造替换 `openai.moderations.create`，返回标准 `flagged`、`categories`、`category_scores` 及 `tc260` 扩展 | `input`: 字符串（`1 ~ 16,000` 字符）或字符串数组（`1 ~ 32` 项） |
+| 10 | `/v1/guard/categories` | `GET` | **TC260 31子类标准目录字典**：拉取国标 `A.1`～`A.5` 五大类与 31 子类官方编码映射表 | 无请求体参数 |
+| 11 | `/v1/platform/catalog` | `GET` | **开放平台 API 元数据目录**：返回平台全部开放 API 的完整 Schema 与示例字典 | 无请求体参数 |
+| 12 | `/api/audit/logs` | `GET` | **安全审计流水多维查询 API**：供 SIEM/SOC 平台分页拉取全链路审计日志 | `offset >= 0`；`limit: 1 ~ 500`；`action`: `allow\|block\|cutoff`；`risk_level`: `SAFE\|CONTROVERSIAL\|UNSAFE` |
+| 13 | `/api/audit/summary` | `GET` | **审计账本与总报告实时对账 API**：返回各 API Key 调用统计、TC260 大类分布、攻击手法排行与人工复核统计 | 无请求体参数 |
 
 ---
 

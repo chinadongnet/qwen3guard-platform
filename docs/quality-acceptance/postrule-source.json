@@ -1,0 +1,8 @@
+{
+  "deobfuscation_ast_sha256": "ef8deba905341d405cee32071fbced297e3a2baf46096ecb132ed2c876b684bb",
+  "shield_sha256_before": "2e35e9cfdf2d1f7c2a4ecc4feb3761cc15ac9e430d8318c5d0a26ee739b31519",
+  "model_manager_sha256": "b023627c27eb151a46bcec9c0789a869b699022b1b4e4708d8128f67f2e2bfee",
+  "guard_output_sha256": "a43547727a9475290a412be2751e48ff62c2eb32f12f01f0dfc2f9f07010dee2",
+  "deobfuscation_source_sha256": "d09299b26a9bc2b1f571e00cbbb9a5c8cc9271efffcfcb9f498389fa3079e971",
+  "verification_note": "AST serialization differs between Python 3.14 host and Python 3.12 container; exact function source SHA used across runtimes."
+}

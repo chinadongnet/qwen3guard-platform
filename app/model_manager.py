@@ -158,6 +158,46 @@ class ModelManager:
             "error": self.load_error,
         }
 
+    def generate_incremental(self, messages, max_tokens, temperature, stop):
+        """Generate one token at a time; release the device lock between steps.
+
+        The caller owns the generator, advances it through a bounded worker and
+        audits buffered output before exposing it. No background generation
+        survives a closed consumer.
+        """
+        encoded = self.llm_tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True, enable_thinking=False)
+        inputs = self.llm_tokenizer(encoded, return_tensors="pt").input_ids.to(self.device)
+        if inputs.shape[1] > 8192:
+            raise ValueError("Conversation exceeds 8192 token budget")
+        cache, generated, emitted = None, [], ""
+        try:
+            for _ in range(max_tokens):
+                if stop.is_set():
+                    break
+                with self._lock, torch.inference_mode():
+                    output = self.llm_model(input_ids=inputs, past_key_values=cache,
+                                            use_cache=True, return_dict=True)
+                    cache = output.past_key_values
+                    logits = output.logits[:, -1, :]
+                    if temperature > 0:
+                        next_token = torch.multinomial(torch.softmax(logits / temperature, dim=-1), 1)
+                    else:
+                        next_token = torch.argmax(logits, dim=-1, keepdim=True)
+                    token_id = int(next_token.item())
+                    inputs = next_token
+                if token_id in (151645, 151643):
+                    break
+                generated.append(token_id)
+                decoded = self.llm_tokenizer.decode(generated, skip_special_tokens=True)
+                if "\ufffd" not in decoded and decoded.startswith(emitted):
+                    delta = decoded[len(emitted):]
+                    emitted = decoded
+                    if delta:
+                        yield delta
+        finally:
+            del cache
+
     def build_guard_gen_prompt(
         self,
         prompt: str,
@@ -229,17 +269,8 @@ class ModelManager:
     @staticmethod
     def parse_guard_gen_output(raw_output: str) -> Tuple[str, List[str], Optional[str]]:
         """Extract (safety_label, categories, refusal) from Qwen3Guard-Gen raw output."""
-        safety_match = SAFETY_RE.search(raw_output)
-        safety = safety_match.group(1).capitalize() if safety_match else "Safe"
-
-        cats = []
-        for m in CATEGORY_RE.findall(raw_output):
-            if m.lower() != "none" and m not in cats:
-                cats.append(m)
-
-        refusal_match = REFUSAL_RE.search(raw_output)
-        refusal = refusal_match.group(1).capitalize() if refusal_match else None
-        return safety, cats, refusal
+        from app.guard_output import parse_guard_output
+        return parse_guard_output(raw_output)
 
     def detect_with_gen(
         self,
@@ -264,6 +295,8 @@ class ModelManager:
         with self._lock, torch.inference_mode():
             model_inputs = self.gen_tokenizer([rendered_prompt], return_tensors="pt").to(self.device)
             input_len = model_inputs.input_ids.shape[1]
+            if input_len > 8192:
+                raise ValueError("Guard input exceeds 8192 token budget")
             gen_kwargs: Dict[str, Any] = {
                 "max_new_tokens": cfg.guard_gen_max_new_tokens,
                 "eos_token_id": [151645, 151643],
@@ -279,6 +312,47 @@ class ModelManager:
             output_ids = generated_ids[0][input_len:]
             raw_output = self.gen_tokenizer.decode(output_ids, skip_special_tokens=True).strip()
 
+        return self._gen_result(prompt, response, cfg, raw_output, (time.perf_counter() - t0) * 1000)
+
+    def detect_with_gen_batch(self, items, cfg):
+        """Bounded offline microbatch; identical template and decision processor."""
+        if not 1 <= len(items) <= 8:
+            raise ValueError("Guard batch supports 1 to 8 items")
+        if not self.loaded:
+            self.load_all()
+        started = time.perf_counter()
+        prompts = []
+        for prompt, response in items:
+            target = security_shield.deobfuscate_and_unwrap(prompt)[0] if cfg.enable_deobfuscation else prompt
+            prompts.append(self.build_guard_gen_prompt(target, response, cfg))
+        with self._lock, torch.inference_mode():
+            # Decoder-only generation requires left padding. Keep the tokenizer
+            # change inside the same lock used by single-item generation.
+            prior_padding = self.gen_tokenizer.padding_side
+            self.gen_tokenizer.padding_side = "left"
+            try:
+                inputs = self.gen_tokenizer(prompts, padding=True, return_tensors="pt").to(self.device)
+            finally:
+                self.gen_tokenizer.padding_side = prior_padding
+            width = inputs.input_ids.shape[1]
+            if width > 8192 or width * len(items) > 16384:
+                raise ValueError("Guard batch exceeds token budget")
+            kwargs = {"max_new_tokens": cfg.guard_gen_max_new_tokens, "eos_token_id": [151645, 151643],
+                      "pad_token_id": 151643, "do_sample": cfg.guard_gen_temperature > .01}
+            if kwargs["do_sample"]:
+                kwargs["temperature"] = cfg.guard_gen_temperature
+            generated = self.gen_model.generate(**inputs, **kwargs)
+            outputs = self.gen_tokenizer.batch_decode(generated[:, width:], skip_special_tokens=True)
+        elapsed = (time.perf_counter() - started) * 1000
+        results = []
+        for (prompt, response), raw in zip(items, outputs):
+            try:
+                results.append(self._gen_result(prompt, response, cfg, raw.strip(), elapsed))
+            except RuntimeError:
+                results.append(None)  # An invalid item gets a normal individual retry.
+        return results
+
+    def _gen_result(self, prompt, response, cfg, raw_output, elapsed_ms):
         qwen_safety, qwen_cats, refusal = self.parse_guard_gen_output(raw_output)
 
         # Combine with Security Shield & TC260 taxonomy
@@ -288,16 +362,14 @@ class ModelManager:
             qwen_safety=qwen_safety,
             qwen_categories=qwen_cats,
             response_text=response or "",
+            response_refused=refusal == "Yes",
         )
 
         # If moderating an assistant response and the assistant already clearly refused an unsafe request,
         # record whether the assistant's reply itself is a safe refusal
-        assistant_refused = refusal == "Yes" or any(
-            kw in (response or "")
-            for kw in ("抱歉", "无法提供", "不能提供", "不能回答", "无法回答", "作为AI", "无法协助", "不能满足", "违反", "安全")
-        )
+        assistant_refused = refusal == "Yes"
 
-        latency_ms = round((time.perf_counter() - t0) * 1000, 2)
+        latency_ms = round(elapsed_ms, 2)
         return {
             "is_safe": shield_res.is_safe,
             "action": "allow" if shield_res.is_safe else "block",
@@ -307,7 +379,7 @@ class ModelManager:
                 "raw_output": raw_output,
                 "safety": qwen_safety,
                 "categories": qwen_cats,
-                "refusal": "Yes" if (response and assistant_refused) else (refusal or "No"),
+                "refusal": "Yes" if (response and assistant_refused) else refusal,
             },
             "tc260": {
                 "major_code": shield_res.tc260_major_code,
@@ -353,6 +425,8 @@ class ModelManager:
         )
         encoded = self.stream_tokenizer(rendered, return_tensors="pt")
         input_ids_1d = encoded.input_ids[0].to(self.device)
+        if len(input_ids_1d) > 8192:
+            raise ValueError("Stream input exceeds 8192-token budget")
 
         # Find where the target text tokens start (after the last <|im_start|>user\n or <|im_start|>assistant\n)
         im_start_id = self.stream_tokenizer.convert_tokens_to_ids("<|im_start|>")
@@ -409,13 +483,15 @@ class ModelManager:
                 continue
             accumulated_text += tok_str
 
-            raw_risk = risk_levels[pos] if pos < len(risk_levels) else "Safe"
-            tok_prob = risk_probs[pos] if pos < len(risk_probs) else 1.0
-            tok_risk = (
-                raw_risk
-                if (raw_risk == "Unsafe" and tok_prob >= max(cfg.stream_unsafe_threshold, 0.80))
-                else "Safe"
-            )
+            if pos >= len(risk_levels) or pos >= len(risk_probs):
+                raise RuntimeError("Incomplete Stream classification")
+            raw_risk, tok_prob = risk_levels[pos], risk_probs[pos]
+            if raw_risk not in ("Safe", "Unsafe", "Controversial"):
+                raise RuntimeError("Unknown Stream risk label")
+            tok_risk = raw_risk if (
+                raw_risk == "Unsafe" and tok_prob >= cfg.stream_unsafe_threshold
+                or raw_risk == "Controversial" and cfg.stream_controversial_as_unsafe
+            ) else "Safe"
             tok_cat = categories[pos] if (tok_risk != "Safe" and pos < len(categories)) else "None"
 
             # Periodic incremental Shield check on accumulated target stream text only
@@ -433,7 +509,7 @@ class ModelManager:
                     shield_hit = shield_eval
 
             is_tok_unsafe = (
-                tok_risk == "Unsafe"
+                tok_risk in ("Unsafe", "Controversial")
                 or (shield_hit is not None and not shield_hit.is_safe)
             )
 
@@ -587,6 +663,8 @@ class ModelManager:
         with self._lock, torch.inference_mode():
             inputs = self.llm_tokenizer([chat_text], return_tensors="pt").to(self.device)
             in_len = inputs.input_ids.shape[1]
+            if in_len > 8192:
+                raise ValueError("Generation input exceeds 8192-token budget")
             gen_kwargs: Dict[str, Any] = {
                 "max_new_tokens": max_tok,
                 "eos_token_id": [151645, 151643],

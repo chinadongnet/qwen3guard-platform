@@ -7,3 +7,4 @@ accelerate>=0.34.0
 safetensors>=0.4.5
 huggingface_hub>=0.25.0
 requests>=2.32.0
+-r requirements-platform.txt

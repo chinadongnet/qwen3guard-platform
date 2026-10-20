@@ -1,0 +1,72 @@
+{
+  "checked_at": "2026-10-20T11:30:29.315834+00:00",
+  "checks": [
+    {
+      "check": "bank_import",
+      "dataset": "curated",
+      "count": 142,
+      "subcategories": 31,
+      "inserted": 142,
+      "skipped": 0
+    },
+    {
+      "check": "bank_import",
+      "dataset": "full",
+      "count": 1607,
+      "subcategories": 31,
+      "inserted": 1607,
+      "skipped": 0
+    },
+    {
+      "check": "prompt_and_ab",
+      "presets": 4,
+      "run_id": "af8601fb1c6849d3a49cf9f7a4d26840",
+      "baseline": "allow",
+      "candidate": "block"
+    },
+    {
+      "check": "real_stream_model",
+      "run_id": "22e8ace44d644ba982b28dcd5a9b7101",
+      "mode": "offline_token_diagnostic",
+      "tokens": 9,
+      "is_safe": true
+    },
+    {
+      "check": "real_generation_comparison",
+      "run_id": "2e7a1d356b7e461ca22c5ed64f4a0e54",
+      "blocked": false,
+      "output_length": 33
+    },
+    {
+      "check": "data_api_token_sse",
+      "status": 200,
+      "token_events": 6
+    },
+    {
+      "check": "bank_job_report_exports",
+      "job_id": "ab9f076c953e409b8c1b884eadaaf35c",
+      "state": "completed",
+      "metrics": {
+        "labeled": 2,
+        "completed": 2,
+        "errors": 0,
+        "tp": 1,
+        "tn": 1,
+        "fp": 0,
+        "fn": 0,
+        "accuracy": 1.0,
+        "precision": 1.0,
+        "f1": 1.0,
+        "benign_pass_rate": 1.0,
+        "recall": 1.0,
+        "false_positive_rate": 0.0
+      },
+      "category_groups": 2
+    },
+    {
+      "check": "production_isolation",
+      "production_items": 0
+    }
+  ],
+  "scope": "Functional GPU acceptance; sample results are not independent quality certification"
+}

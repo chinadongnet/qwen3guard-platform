@@ -1,0 +1,34 @@
+{
+  "baseline_commit": "305f664",
+  "scope": "Deterministic implementation probes, not model quality evaluation",
+  "checks": [
+    {
+      "check": "unsafe_dataset_label_changes_safe_model_decision",
+      "legacy": false,
+      "current": true
+    },
+    {
+      "check": "benign_dataset_label_overrides_unsafe_model_decision",
+      "legacy": true,
+      "current": false
+    },
+    {
+      "check": "apology_is_not_a_safety_refusal",
+      "legacy_refusal_flag": true,
+      "sample": "抱歉，会议延后到明天，请更新日程。",
+      "current": "No compliance score inferred from refusal keywords"
+    },
+    {
+      "check": "legacy_custom_allow_keywords_is_noop",
+      "before_is_safe": false,
+      "after_is_safe": false,
+      "reason": "Original keyword-matched branch contains pass only"
+    },
+    {
+      "check": "legacy_sse_computes_before_replay",
+      "scan_line": 866,
+      "first_yield_line": 882,
+      "current_mode": "offline_token_diagnostic"
+    }
+  ]
+}

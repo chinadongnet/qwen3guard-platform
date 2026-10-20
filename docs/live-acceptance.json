@@ -1,0 +1,63 @@
+{
+  "observed_at": "2026-10-20T09:38:30.581221+00:00",
+  "project_id": "c5f3914d4fd843b0b73b2c3e27b09cc3",
+  "application_id": "69f0244af56042ca86efea2eb86aafca",
+  "checks": [
+    {
+      "check": "policy_publication_gate",
+      "unverified_http": 409,
+      "published_version": 3,
+      "evaluation_job_id": "747db095507248bea178834c30c62a7f"
+    },
+    {
+      "check": "live_detection",
+      "decision": "allow",
+      "elapsed_ms": 1818.02,
+      "audit_id": "26471884dd584b1dad159f6b7b7a84b4",
+      "request_id": "847cd44cda9d4a8487ebee2773fe3f82"
+    },
+    {
+      "check": "live_detection",
+      "decision": "block",
+      "elapsed_ms": 1793.29,
+      "audit_id": "c1f9fce0b45849e19070f24136f5c774",
+      "request_id": "e74a8b47fcfa4411ba42738e9f720f2f"
+    },
+    {
+      "check": "application_audit_isolation",
+      "passed": true
+    },
+    {
+      "check": "live_incremental_chat",
+      "chunks": 10,
+      "first_audited_chunk_ms": 7490.33,
+      "elapsed_ms": 51029.59
+    },
+    {
+      "check": "durable_evaluation",
+      "job_id": "e53f09af6dc943d995c1237c3584d6b6",
+      "state": "completed",
+      "metrics": {
+        "labeled": 2,
+        "completed": 2,
+        "errors": 0,
+        "tp": 1,
+        "tn": 1,
+        "fp": 0,
+        "fn": 0,
+        "accuracy": 1.0,
+        "recall": 1.0,
+        "false_positive_rate": 0.0
+      }
+    },
+    {
+      "check": "sandbox_excluded_from_production",
+      "production_count": 0
+    },
+    {
+      "check": "key_revocation",
+      "http_status": 403
+    }
+  ],
+  "scope": "Smoke acceptance only; not throughput or independent accuracy certification"
+}

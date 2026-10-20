@@ -1,0 +1,94 @@
+{
+  "Qwen3Guard-Gen-0.6B/generation_config.json": {
+    "sha256": "5f0bc42aae9f779d06bf620ce685a02cb0cde802d0f27f05c7331aaf0e1fd2d7",
+    "bytes": 161
+  },
+  "Qwen3Guard-Gen-0.6B/config.json": {
+    "sha256": "4674816bdf440c113a9ca87aedfa069b67f7cabbd89e71da7d4e4a68adce4af4",
+    "bytes": 727
+  },
+  "Qwen3Guard-Gen-0.6B/tokenizer_config.json": {
+    "sha256": "934e187433b06c5d28519e0347dd293084cf28621f00a86ae7e24e42f8b53e81",
+    "bytes": 9601
+  },
+  "Qwen3Guard-Gen-0.6B/configuration.json": {
+    "sha256": "f888421726665e8a84b738eed42a64875aed79de8be7daade851ac8bf4c0cef9",
+    "bytes": 73
+  },
+  "Qwen3Guard-Gen-0.6B/model.safetensors": {
+    "sha256": "4f3ce47ebd968cddb67de08d8764f8ede7c410a7d1fb9e08145a4c7a2f2e5c0f",
+    "bytes": 1503300328
+  },
+  "Qwen3Guard-Gen-0.6B/vocab.json": {
+    "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+    "bytes": 2776833
+  },
+  "Qwen3Guard-Gen-0.6B/tokenizer.json": {
+    "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
+    "bytes": 11422654
+  },
+  "Qwen3-0.6B/generation_config.json": {
+    "sha256": "2325da0f15bb848e018c5ae071b7943332e9f871d6b60e2ed22ca97d4cb993d2",
+    "bytes": 239
+  },
+  "Qwen3-0.6B/config.json": {
+    "sha256": "660db3b73d788119c04535e48cf9be5f55bc3100841a718637ae695b442f27dd",
+    "bytes": 726
+  },
+  "Qwen3-0.6B/tokenizer_config.json": {
+    "sha256": "d5d09f07b48c3086c508b30d1c9114bd1189145b74e982a265350c923acd8101",
+    "bytes": 9732
+  },
+  "Qwen3-0.6B/configuration.json": {
+    "sha256": "f888421726665e8a84b738eed42a64875aed79de8be7daade851ac8bf4c0cef9",
+    "bytes": 73
+  },
+  "Qwen3-0.6B/model.safetensors": {
+    "sha256": "f47f71177f32bcd101b7573ec9171e6a57f4f4d31148d38e382306f42996874b",
+    "bytes": 1503300328
+  },
+  "Qwen3-0.6B/vocab.json": {
+    "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+    "bytes": 2776833
+  },
+  "Qwen3-0.6B/tokenizer.json": {
+    "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
+    "bytes": 11422654
+  },
+  "Qwen3Guard-Stream-0.6B/generation_config.json": {
+    "sha256": "52a5a5dd9227794548c6de5e0a1c8bc795a662912bdae6a3a7e4226c542e835c",
+    "bytes": 161
+  },
+  "Qwen3Guard-Stream-0.6B/config.json": {
+    "sha256": "e768c6c869c5c2425ba525d9a6f31bdc55bbeb5993b7aced49cbaad9bb4da44a",
+    "bytes": 1533
+  },
+  "Qwen3Guard-Stream-0.6B/tokenizer_config.json": {
+    "sha256": "d5d09f07b48c3086c508b30d1c9114bd1189145b74e982a265350c923acd8101",
+    "bytes": 9732
+  },
+  "Qwen3Guard-Stream-0.6B/configuration.json": {
+    "sha256": "a78221ae93dd8977b26fcd1d106fa5ad7e7f1fd3a7d93bfd9d6fba5ed00ec4d2",
+    "bytes": 48
+  },
+  "Qwen3Guard-Stream-0.6B/model.safetensors": {
+    "sha256": "e0a2eac6cc79cca5bf35bf8fb356f94c333dd9715f4f0dd58883b01f2fe33419",
+    "bytes": 1194258680
+  },
+  "Qwen3Guard-Stream-0.6B/vocab.json": {
+    "sha256": "87a257b04b17642a0688c98cd1df89c398bda4fee532d6f88b38a659ecb4ac8d",
+    "bytes": 3383407
+  },
+  "Qwen3Guard-Stream-0.6B/tokenizer.json": {
+    "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
+    "bytes": 11422654
+  },
+  "Qwen3Guard-Stream-0.6B/modeling_qwen3_guard.py": {
+    "sha256": "8cbe01015e33d1f09d81afb67cd1a3083c1fb53edfcd72cfc2c25fd8792d5562",
+    "bytes": 12550
+  },
+  "Qwen3Guard-Stream-0.6B/configuration_qwen3.py": {
+    "sha256": "7d2e0ae80b6476f978b918e3409a6a9313a55bf86e2dc7ad3cf5f92cafd323d7",
+    "bytes": 361
+  }
+}

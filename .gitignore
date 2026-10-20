@@ -21,3 +21,12 @@ models/
 .DS_Store
 Thumbs.db
 *.log
+.env
+.env.*
+!.env.example
+data/*.db
+data/*.db-*
+data/backups/
+data/bootstrap-credentials.txt
+.pytest_cache/
+artifacts/

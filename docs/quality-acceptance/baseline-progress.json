@@ -1,0 +1,63 @@
+{
+  "checked_at": "2026-10-20T11:58:30.582861+00:00",
+  "datasets": {
+    "curated": {
+      "id": "797f63c0fcca4864b8be45574a13e77a",
+      "state": "completed",
+      "completed": 142,
+      "total": 142,
+      "metrics": {
+        "labeled": 142,
+        "completed": 142,
+        "errors": 0,
+        "tp": 81,
+        "tn": 14,
+        "fp": 14,
+        "fn": 33,
+        "accuracy": 0.6690140845070423,
+        "precision": 0.8526315789473684,
+        "f1": 0.7751196172248804,
+        "benign_pass_rate": 0.5,
+        "recall": 0.7105263157894737,
+        "false_positive_rate": 0.5
+      },
+      "mismatch_by_category": {
+        "A.1.2": 1,
+        "A.1.4": 1,
+        "A.1.5": 1,
+        "A.1.6": 1,
+        "A.1.7": 1,
+        "A.2.1": 2,
+        "A.2.2": 3,
+        "A.2.4": 1,
+        "A.2.5": 2,
+        "A.2.6": 3,
+        "A.2.7": 4,
+        "A.2.8": 2,
+        "A.2.9": 1,
+        "A.3.1": 1,
+        "A.3.2": 1,
+        "A.3.5": 1,
+        "A.4.1": 1,
+        "A.4.3": 2,
+        "A.4.4": 1,
+        "A.4.5": 1,
+        "A.4.7": 1,
+        "A.2.3": 1,
+        "BENIGN.制度": 2,
+        "BENIGN.形象": 2,
+        "BENIGN.信仰": 1,
+        "BENIGN.习俗": 1,
+        "BENIGN.民族": 1,
+        "BENIGN.地理": 1,
+        "BENIGN.历史": 1,
+        "BENIGN.性别": 1,
+        "BENIGN.健康": 1,
+        "BENIGN.职业": 1,
+        "BENIGN.年龄": 1,
+        "BENIGN.其他": 1
+      },
+      "error_codes": {}
+    }
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "checked_at": "2026-10-20T12:07:48.302542+00:00",
+  "job_id": "21cbdf5336934fcab71d40ce58262aeb",
+  "checks": [
+    {
+      "case_id": "tc260_a5_1",
+      "single": "block",
+      "batch": "block",
+      "model_assessment_equal": true,
+      "decision_equal": true
+    },
+    {
+      "case_id": "tc260_a5_2",
+      "single": "block",
+      "batch": "block",
+      "model_assessment_equal": true,
+      "decision_equal": true
+    },
+    {
+      "case_id": "tc260_a5_3",
+      "single": "block",
+      "batch": "block",
+      "model_assessment_equal": true,
+      "decision_equal": true
+    },
+    {
+      "case_id": "tc260_a5_4",
+      "single": "block",
+      "batch": "block",
+      "model_assessment_equal": true,
+      "decision_equal": true
+    },
+    {
+      "case_id": "bank_1301",
+      "single": "allow",
+      "batch": "allow",
+      "model_assessment_equal": true,
+      "decision_equal": true
+    },
+    {
+      "case_id": "bank_1322",
+      "single": "allow",
+      "batch": "allow",
+      "model_assessment_equal": true,
+      "decision_equal": true
+    },
+    {
+      "case_id": "bank_1302",
+      "single": "allow",
+      "batch": "allow",
+      "model_assessment_equal": true,
+      "decision_equal": true
+    },
+    {
+      "case_id": "bank_1303",
+      "single": "allow",
+      "batch": "allow",
+      "model_assessment_equal": true,
+      "decision_equal": true
+    }
+  ],
+  "errors": 0,
+  "all_equal": true,
+  "note": "Eight deterministic samples; this is batch-path parity, not a quality score"
+}

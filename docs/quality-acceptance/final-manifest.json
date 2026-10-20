@@ -1,0 +1,72 @@
+{
+  "started_at": "2026-10-20T12:00:36.782264+00:00",
+  "project_id": "c5f3914d4fd843b0b73b2c3e27b09cc3",
+  "application_id": "69f0244af56042ca86efea2eb86aafca",
+  "policy_version": {
+    "id": "87dfed31d083434ca4e9803a3e1a9edd",
+    "created_at": 1792489044.412342,
+    "policy_id": "6797428c99224b4cbf9c1e468a992e77",
+    "version": 3,
+    "config": {
+      "risk_threshold": 0.5,
+      "controversial_as_unsafe": true,
+      "enable_deobfuscation": true,
+      "enable_jailbreak_shield": true,
+      "enable_tc260_semantic_shield": true,
+      "pii_action": "block",
+      "custom_block_keywords": [
+        "验收拦截标记"
+      ],
+      "timeout_seconds": 30,
+      "stream_window_chars": 16,
+      "failure_action": "block"
+    },
+    "author_id": "21253d261d99462593e1b274c3c61dc9"
+  },
+  "code_sha256": {
+    "app/enterprise/__init__.py": "92cb88ded18ecde83656309265a78c7cf3b356e11058f8134ab4df8dbd62ea21",
+    "app/enterprise/admin.py": "4eb6e397b42b94a38593c6b0b2603ca42e9fce3a613d6159f87ca1ca3bc0f3af",
+    "app/enterprise/application.py": "9e28b87396e3c644809c9847c5ebc21de4796a213c96a2b0833b7ea01d93152b",
+    "app/enterprise/data_api.py": "2ec98d3567de8e626eb91f1753e8d9fbfb772c61e55772ba81139ebfd0b0a805",
+    "app/enterprise/db.py": "b7e294c04c825c8081ee8502c575d5f20af4ec4cd484e39b51ca0825b2195a67",
+    "app/enterprise/inference.py": "88721dc2f68f6c70a4aa522bbe9a522db941d6888a4f3e47c5c6437c453fee55",
+    "app/enterprise/network.py": "a5dc762985149e4473b5d3b1184b6cab36602f591959d038179d824d5fb9573a",
+    "app/enterprise/presets.py": "5a4254529622739eddaf0cb0da023152cab95a3d8d9c946a3ced50d09eb21a67",
+    "app/enterprise/quality.py": "868c2f73273898b4179705f59b5d99876c0d5733b21a1985d906102596a68a40",
+    "app/enterprise/schemas.py": "fad8d4d60c9e45c1582054346b94457215a617fef82c1e613a80a174f202fcdd",
+    "app/enterprise/security.py": "b17387725be838d230d136001854891774b94eb8ad4e8926714de428e94f9a39",
+    "app/enterprise/service.py": "3bea1413989dae2fb3e55cd0b5d1d6953d500332130422d61351e7e2a30eb049",
+    "app/enterprise/settings.py": "89431947be70cee1522715304dd8e5ddb1dd2e2abfc91eda936ea7d5569ecafa",
+    "app/enterprise/tasks.py": "18086a8c78180f56dda5f691e2ff3d5fc373c7025069a96cac6a3a6f61424a91",
+    "app/enterprise/workbench.py": "1370803349525aea9a787fea3db06aa31fbf0503b0dc0f7cfd30beb78081bcaa",
+    "app/model_manager.py": "853c175141388d3d5052b5183342c22694f45c920c06e3dc1852843b8483812f",
+    "app/security_shield.py": "b2ffff5a41bb5a9881f337f01e0fd224dc7a32613db29d5c89b8d78b21833c9d",
+    "app/config.py": "8bbe3eba704147694fb0bfe6722defefb89bc140453eef8f9f7e79726d9c9517",
+    "app/guard_output.py": "a43547727a9475290a412be2751e48ff62c2eb32f12f01f0dfc2f9f07010dee2"
+  },
+  "jobs": {
+    "curated": {
+      "id": "dbd7ef85bfc24f08ac4071045cb69b83",
+      "state": "queued",
+      "total": 142,
+      "snapshot_sha256": "5e93a97db58fb643299ec2679989ac8b3d782deef8f466d417a00b28bc505a58",
+      "unsafe": 114,
+      "benign": 28,
+      "duplicate_excess": 0,
+      "conflicting_labels": []
+    },
+    "full": {
+      "id": "fd3733fa203e4d5683eaa5d816fb4107",
+      "state": "queued",
+      "total": 1607,
+      "snapshot_sha256": "8d643b2a2f0788ce85d7b15c021b509e5ed72ea63c534d152835d3a082b9c156",
+      "unsafe": 1307,
+      "benign": 300,
+      "duplicate_excess": 0,
+      "conflicting_labels": []
+    }
+  },
+  "scope": "Input moderation against original suite-derived prompt labels; not independent certification",
+  "valid_for_quality": false,
+  "invalidation_reason": "Legacy suite-derived labels were applied to the wrong moderation target; superseded by source-validated acceptance."
+}

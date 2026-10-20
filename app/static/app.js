@@ -16,53 +16,180 @@ let currentSDKLang = 'python';
 let cachedAccessUrls = ['http://127.0.0.1:8092'];
 let cachedApiKeys = [];
 
-// -------------------- Navigation --------------------
-function switchView(viewId, title, btnEl) {
+// -------------------- Navigation & HTML5 Real URL Router --------------------
+const VIEW_ROUTES = {
+  'view-dashboard': '/dashboard',
+  'view-qbank': '/qbank',
+  'view-tuning': '/tuning',
+  'view-gateway': '/gateway',
+  'view-api-portal': '/api-portal',
+  'view-audit': '/audit',
+  'view-reports': '/reports',
+  'view-inspector': '/inspector'
+};
+
+const ROUTE_TO_VIEW = {
+  '/': 'view-dashboard',
+  '/dashboard': 'view-dashboard',
+  '/qbank': 'view-qbank',
+  '/tuning': 'view-tuning',
+  '/gateway': 'view-gateway',
+  '/api-portal': 'view-api-portal',
+  '/audit': 'view-audit',
+  '/reports': 'view-reports',
+  '/inspector': 'view-inspector'
+};
+
+const VIEW_TITLES = {
+  'view-dashboard': '态势总览与监控中心',
+  'view-qbank': 'TC260 合规题库管理中心',
+  'view-tuning': '提示词与参数联合调测中心',
+  'view-gateway': 'API 网关与多语言接入配置',
+  'view-api-portal': 'REST API 开放平台：逐接口接入文档与动态在线调试台',
+  'view-audit': '安全审计与 API Key 调用溯源管理系统',
+  'view-reports': '合规评测总报告与实时审计对账中心',
+  'view-inspector': '在线安全检测、流式熔断与攻防演练台'
+};
+
+function findSidebarBtnForView(viewId) {
+  const btns = Array.from(document.querySelectorAll('.sidebar .nav-item'));
+  return btns.find(b => (b.getAttribute('onclick') || '').includes(`'${viewId}'`)) || null;
+}
+
+function buildTargetUrlForView(viewId) {
+  const basePath = VIEW_ROUTES[viewId] || '/dashboard';
+  if (viewId === 'view-api-portal' && typeof currentPortalApiId === 'string' && currentPortalApiId) {
+    return `${basePath}?api=${encodeURIComponent(currentPortalApiId)}`;
+  }
+  if (viewId === 'view-audit') {
+    const keyEl = document.getElementById('aud-filter-key');
+    const keyVal = keyEl ? keyEl.value : '';
+    if (keyVal) {
+      return `${basePath}?key=${encodeURIComponent(keyVal)}`;
+    }
+  }
+  return basePath;
+}
+
+function updateTopbarRoutePill() {
+  const pill = document.getElementById('tb-route-pill');
+  if (pill) {
+    pill.textContent = window.location.pathname + window.location.search;
+  }
+}
+
+function copyCurrentPageUrl() {
+  const fullUrl = window.location.href;
+  navigator.clipboard.writeText(fullUrl);
+  alert('已复制当前页面直达 URL（支持直接刷新、书签收藏与分享）：\n' + fullUrl);
+}
+
+function switchView(viewId, title, btnEl, opts = {}) {
+  const resolvedViewId = VIEW_ROUTES[viewId] ? viewId : 'view-dashboard';
+  const resolvedTitle = title || VIEW_TITLES[resolvedViewId] || '态势总览与监控中心';
+  const resolvedBtn = btnEl || findSidebarBtnForView(resolvedViewId);
+
   document.querySelectorAll('.view-pane').forEach(el => el.classList.remove('active'));
   document.querySelectorAll('.sidebar .nav-item').forEach(el => el.classList.remove('active'));
-  const pane = document.getElementById(viewId);
+  const pane = document.getElementById(resolvedViewId);
   if (pane) pane.classList.add('active');
-  if (btnEl) btnEl.classList.add('active');
-  if (title) document.getElementById('topbar-page-title').textContent = title;
+  if (resolvedBtn) resolvedBtn.classList.add('active');
+  const titleEl = document.getElementById('topbar-page-title');
+  if (titleEl) titleEl.textContent = resolvedTitle;
+  document.title = `${resolvedTitle} — Qwen3Guard 安全中台`;
 
-  if (viewId === 'view-dashboard') {
+  if (!opts.skipHistory) {
+    const targetUrl = buildTargetUrlForView(resolvedViewId);
+    const currentUrl = window.location.pathname + window.location.search;
+    if (currentUrl !== targetUrl) {
+      if (opts.replaceHistory) {
+        window.history.replaceState({ viewId: resolvedViewId }, '', targetUrl);
+      } else {
+        window.history.pushState({ viewId: resolvedViewId }, '', targetUrl);
+      }
+    }
+  }
+  updateTopbarRoutePill();
+
+  if (resolvedViewId === 'view-dashboard') {
     refreshStatus();
     loadAuditLogs();
     loadSavedBenchmark();
-  } else if (viewId === 'view-qbank') {
+  } else if (resolvedViewId === 'view-qbank') {
     loadQuestionBankStats();
     loadQuestionBank(qbCurrentOffset);
-  } else if (viewId === 'view-tuning') {
+  } else if (resolvedViewId === 'view-tuning') {
     loadConfigAndPresets();
-  } else if (viewId === 'view-gateway') {
+  } else if (resolvedViewId === 'view-gateway') {
     loadGatewayConfig();
     renderSDKCode();
-  } else if (viewId === 'view-api-portal') {
+  } else if (resolvedViewId === 'view-api-portal') {
     loadGatewayConfig().then(() => initApiPortal());
-  } else if (viewId === 'view-audit') {
+  } else if (resolvedViewId === 'view-audit') {
     loadGatewayConfig().then(() => loadAuditManagement(audCurrentOffset));
-  } else if (viewId === 'view-reports') {
+  } else if (resolvedViewId === 'view-reports') {
     loadSavedBenchmark();
-  } else if (viewId === 'view-inspector') {
+  } else if (resolvedViewId === 'view-inspector') {
     loadGatewayConfig();
   }
 }
 
-function navTo(viewId) {
-  const btns = Array.from(document.querySelectorAll('.sidebar .nav-item'));
-  const matchedBtn = btns.find(b => (b.getAttribute('onclick') || '').includes(`'${viewId}'`));
-  const titleMap = {
-    'view-dashboard': '态势总览与监控中心',
-    'view-qbank': 'TC260 合规题库管理中心',
-    'view-tuning': '提示词与参数联合调测中心',
-    'view-gateway': 'API 网关与多语言接入配置',
-    'view-api-portal': 'REST API 开放平台：逐接口接入文档与动态在线调试台',
-    'view-audit': '安全审计与 API Key 调用溯源管理系统',
-    'view-reports': '合规评测总报告与实时审计对账中心',
-    'view-inspector': '在线安全检测、流式熔断与攻防演练台'
-  };
-  switchView(viewId, titleMap[viewId] || '', matchedBtn);
+function navTo(viewId, opts = {}) {
+  const matchedBtn = findSidebarBtnForView(viewId);
+  switchView(viewId, VIEW_TITLES[viewId] || '', matchedBtn, opts);
 }
+
+function syncRouteFromLocation(isInitial = false) {
+  let pathname = window.location.pathname || '/';
+  if (pathname.length > 1 && pathname.endsWith('/')) {
+    pathname = pathname.slice(0, -1);
+  }
+  const params = new URLSearchParams(window.location.search || '');
+
+  // Support hash fallback if someone visits /#/qbank etc.
+  if (pathname === '/' && window.location.hash && window.location.hash.startsWith('#/')) {
+    const hashPath = window.location.hash.slice(1).split('?')[0];
+    if (ROUTE_TO_VIEW[hashPath]) {
+      pathname = hashPath;
+    }
+  }
+
+  let targetViewId = 'view-dashboard';
+
+  if (pathname === '/api-portal' || pathname.startsWith('/api-portal/')) {
+    targetViewId = 'view-api-portal';
+    const apiFromQuery = params.get('api');
+    const apiFromSubpath = pathname.startsWith('/api-portal/') ? pathname.slice('/api-portal'.length) : '';
+    const candidateApi = apiFromQuery || apiFromSubpath;
+    if (candidateApi && typeof REST_API_PORTAL_SPECS !== 'undefined') {
+      const matchedSpec = REST_API_PORTAL_SPECS.find(s => s.id === candidateApi);
+      if (matchedSpec) {
+        currentPortalApiId = matchedSpec.id;
+      }
+    }
+  } else if (pathname === '/audit' || pathname.startsWith('/audit/')) {
+    targetViewId = 'view-audit';
+    const keyFromQuery = params.get('key');
+    const keyFromSubpath = pathname.startsWith('/audit/') ? decodeURIComponent(pathname.slice('/audit/'.length)) : '';
+    const candidateKey = keyFromQuery || keyFromSubpath;
+    const filterSel = document.getElementById('aud-filter-key');
+    const simSel = document.getElementById('aud-sim-key');
+    if (filterSel && candidateKey !== null) filterSel.value = candidateKey || '';
+    if (simSel && candidateKey) simSel.value = candidateKey;
+  } else if (ROUTE_TO_VIEW[pathname]) {
+    targetViewId = ROUTE_TO_VIEW[pathname];
+  }
+
+  const shouldReplace = isInitial && pathname === '/';
+  switchView(targetViewId, VIEW_TITLES[targetViewId], null, {
+    skipHistory: !shouldReplace,
+    replaceHistory: shouldReplace
+  });
+}
+
+window.addEventListener('popstate', () => {
+  syncRouteFromLocation(false);
+});
 
 function jumpToKeyAudit(keyId) {
   const sel = document.getElementById('aud-filter-key');
@@ -70,17 +197,24 @@ function jumpToKeyAudit(keyId) {
   navTo('view-audit');
   setTimeout(() => {
     if (sel) sel.value = keyId || '';
+    const targetUrl = buildTargetUrlForView('view-audit');
+    window.history.replaceState({ viewId: 'view-audit' }, '', targetUrl);
+    updateTopbarRoutePill();
     loadAuditManagement(0);
   }, 60);
 }
 
 function testWithApiKey(keyId) {
+  const filterSel = document.getElementById('aud-filter-key');
+  if (filterSel) filterSel.value = keyId || '';
   navTo('view-audit');
   setTimeout(() => {
     const simSel = document.getElementById('aud-sim-key');
     if (simSel && keyId) simSel.value = keyId;
-    const filterSel = document.getElementById('aud-filter-key');
     if (filterSel) filterSel.value = keyId || '';
+    const targetUrl = buildTargetUrlForView('view-audit');
+    window.history.replaceState({ viewId: 'view-audit' }, '', targetUrl);
+    updateTopbarRoutePill();
     loadAuditManagement(0);
   }, 80);
 }
@@ -1404,6 +1538,13 @@ function renderApiPortalSidebar() {
 function selectApiPortalEndpoint(apiId) {
   const spec = REST_API_PORTAL_SPECS.find(s => s.id === apiId) || REST_API_PORTAL_SPECS[0];
   currentPortalApiId = spec.id;
+  if (window.location.pathname.startsWith('/api-portal')) {
+    const targetUrl = `/api-portal?api=${encodeURIComponent(spec.id)}`;
+    if (window.location.pathname + window.location.search !== targetUrl) {
+      window.history.replaceState({ viewId: 'view-api-portal', api: spec.id }, '', targetUrl);
+      updateTopbarRoutePill();
+    }
+  }
   renderApiPortalSidebar();
   updateApiPortalUrlBar(spec);
 
@@ -2169,6 +2310,10 @@ function resetAuditFilters() {
   document.getElementById('aud-filter-major').value = '';
   document.getElementById('aud-filter-review').value = '';
   document.getElementById('aud-filter-q').value = '';
+  if (window.location.pathname.startsWith('/audit')) {
+    window.history.replaceState({ viewId: 'view-audit' }, '', '/audit');
+    updateTopbarRoutePill();
+  }
   loadAuditManagement(0);
 }
 
@@ -2177,6 +2322,11 @@ function selectKeyAuditCard(keyId) {
   if (keyId) {
     const simSel = document.getElementById('aud-sim-key');
     if (simSel) simSel.value = keyId;
+  }
+  if (window.location.pathname.startsWith('/audit')) {
+    const targetUrl = keyId ? `/audit?key=${encodeURIComponent(keyId)}` : '/audit';
+    window.history.replaceState({ viewId: 'view-audit', key: keyId || '' }, '', targetUrl);
+    updateTopbarRoutePill();
   }
   loadAuditManagement(0);
 }
@@ -3435,8 +3585,10 @@ function escapeHtml(str) {
 
 window.addEventListener('DOMContentLoaded', async () => {
   onAuditSimEndpointChange();
+  syncRouteFromLocation(true);
   await loadGatewayConfig();
   await refreshStatus();
+  syncRouteFromLocation(false);
   initApiPortal();
   loadSavedBenchmark();
   loadAuditLogs();

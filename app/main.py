@@ -258,13 +258,31 @@ class DynamicLLMSelfTestRequest(BaseModel):
     sample_count: int = Field(default=12, ge=4, le=40)
 
 
-# -------------------- Web UI & Status Endpoints --------------------
-@app.get("/", response_class=HTMLResponse)
-async def index_page():
+# -------------------- Web UI & Status Endpoints (Real URL SPA Routes) --------------------
+def _serve_spa_index():
     index_file = STATIC_DIR / "index.html"
     if index_file.exists():
         return FileResponse(index_file)
     return HTMLResponse("<h1>Qwen3Guard Service Running</h1>")
+
+
+@app.get("/", response_class=HTMLResponse)
+async def index_page():
+    return _serve_spa_index()
+
+
+@app.get("/dashboard", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/qbank", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/tuning", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/gateway", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/api-portal", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/api-portal/{subpath:path}", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/audit", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/audit/{subpath:path}", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/reports", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/inspector", response_class=HTMLResponse, include_in_schema=False)
+async def spa_view_routes(subpath: Optional[str] = None):
+    return _serve_spa_index()
 
 
 @app.get("/health")

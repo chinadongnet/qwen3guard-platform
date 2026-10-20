@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Qwen3Guard 企业级大模型安全治理与 TC260 合规中台</title>
-  <link rel="stylesheet" href="/static/styles.css?v=2.7.0" />
+  <link rel="stylesheet" href="/static/styles.css?v=2.7.2" />
 </head>
 <body>
 
@@ -90,6 +90,9 @@
         <span class="badge info" id="topbar-preset-badge">当前策略: TC260-003 标准合规模式</span>
       </div>
       <div class="topbar-telemetry">
+        <div class="telemetry-pill" style="cursor:pointer; border-color:rgba(59,130,246,0.45); color:#93c5fd;" onclick="copyCurrentPageUrl()" title="点击复制当前页面真实直达 URL（支持直接刷新与分享）">
+          🔗 路由: <code id="tb-route-pill" style="color:#f8fafc;">/dashboard</code>
+        </div>
         <div class="telemetry-pill"><span class="status-dot"></span> <span id="tb-gpu">GPU 加载中...</span></div>
         <div class="telemetry-pill" id="tb-vram">显存: --</div>
         <div class="telemetry-pill" id="tb-lan">网络: 0.0.0.0:8092</div>
@@ -1566,6 +1569,6 @@
     </div>
   </div>
 
-  <script src="/static/app.js?v=2.7.1"></script>
+  <script src="/static/app.js?v=2.7.2"></script>
 </body>
 </html>

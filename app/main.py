@@ -172,85 +172,85 @@ async def add_enterprise_gateway_headers(request: Request, call_next):
     return response
 
 
-# -------------------- Request Schemas --------------------
+# -------------------- Request Schemas (with Strict Boundary Constraints) --------------------
 class GuardDetectRequest(BaseModel):
-    prompt: str = Field(..., description="User input text to inspect")
-    response: Optional[str] = Field(default=None, description="Optional assistant response text to inspect")
+    prompt: str = Field(..., min_length=1, max_length=16384, description="User input text to inspect (1 ~ 16,384 chars)")
+    response: Optional[str] = Field(default=None, max_length=32768, description="Optional assistant response text to inspect (0 ~ 32,768 chars)")
     include_stream_tokens: bool = Field(default=False, description="Also run Qwen3Guard-Stream token-level analysis")
-    api_key: Optional[str] = Field(default=None, description="Optional API key token or ID override")
+    api_key: Optional[str] = Field(default=None, max_length=128, description="Optional API key token or ID override")
 
 
 class BatchGuardItem(BaseModel):
-    id: Optional[str] = Field(default=None, description="Caller custom item ID")
-    prompt: str = Field(..., description="User input text to inspect")
-    response: Optional[str] = Field(default=None, description="Optional assistant response text")
+    id: Optional[str] = Field(default=None, max_length=64, description="Caller custom item ID (max 64 chars)")
+    prompt: str = Field(..., min_length=1, max_length=8192, description="User input text to inspect (1 ~ 8,192 chars)")
+    response: Optional[str] = Field(default=None, max_length=16384, description="Optional assistant response text (0 ~ 16,384 chars)")
 
 
 class BatchGuardRequest(BaseModel):
-    items: List[BatchGuardItem] = Field(..., description="List of items for batch moderation (up to 50 per call)")
-    api_key: Optional[str] = Field(default=None, description="Optional API key token or ID override")
+    items: List[BatchGuardItem] = Field(..., min_length=1, max_length=50, description="List of items for batch moderation (1 ~ 50 items per call)")
+    api_key: Optional[str] = Field(default=None, max_length=128, description="Optional API key token or ID override")
 
 
 class DeobfuscateRequest(BaseModel):
-    text: str = Field(..., description="Text potentially containing Base64/Hex/Leetspeak/Zero-width/PII")
+    text: str = Field(..., min_length=1, max_length=16384, description="Text potentially containing Base64/Hex/Leetspeak/Zero-width/PII (1 ~ 16,384 chars)")
     mask_pii: bool = Field(default=True, description="Whether to return masked PII text")
-    api_key: Optional[str] = Field(default=None, description="Optional API key token or ID override")
+    api_key: Optional[str] = Field(default=None, max_length=128, description="Optional API key token or ID override")
 
 
 class LegacyGuardInputRequest(BaseModel):
-    text: str = Field(..., description="Input text")
+    text: str = Field(..., min_length=1, max_length=16384, description="Input text (1 ~ 16,384 chars)")
     context: Optional[Dict[str, Any]] = None
-    api_key: Optional[str] = None
+    api_key: Optional[str] = Field(default=None, max_length=128)
 
 
 class LegacyGuardOutputRequest(BaseModel):
-    prompt: Optional[str] = Field(default="", description="Original user prompt")
-    text: str = Field(..., description="Model output text")
-    api_key: Optional[str] = None
+    prompt: Optional[str] = Field(default="", max_length=16384, description="Original user prompt (0 ~ 16,384 chars)")
+    text: str = Field(..., min_length=1, max_length=32768, description="Model output text (1 ~ 32,768 chars)")
+    api_key: Optional[str] = Field(default=None, max_length=128)
 
 
 class ModerationsRequest(BaseModel):
-    input: Any = Field(..., description="String or list of strings to moderate")
-    model: Optional[str] = Field(default="Qwen3Guard-Gen-0.6B")
-    api_key: Optional[str] = None
+    input: Any = Field(..., description="String (1 ~ 16,384 chars) or list of strings (1 ~ 32 items) to moderate")
+    model: Optional[str] = Field(default="Qwen3Guard-Gen-0.6B", max_length=64)
+    api_key: Optional[str] = Field(default=None, max_length=128)
 
 
 class StreamGuardRequest(BaseModel):
-    prompt: str = Field(..., description="User prompt or streaming text")
-    response: Optional[str] = Field(default=None, description="Optional assistant streaming response")
-    chunk_delay_ms: int = Field(default=15, ge=0, le=500, description="Simulated delay per token for SSE visualization")
-    api_key: Optional[str] = None
+    prompt: str = Field(..., min_length=1, max_length=8192, description="User prompt or streaming text (1 ~ 8,192 chars)")
+    response: Optional[str] = Field(default=None, max_length=16384, description="Optional assistant streaming response (0 ~ 16,384 chars)")
+    chunk_delay_ms: int = Field(default=15, ge=0, le=500, description="Simulated delay per token for SSE visualization (0 ~ 500 ms)")
+    api_key: Optional[str] = Field(default=None, max_length=128)
 
 
 class DynamicLLMRequest(BaseModel):
-    prompt: str = Field(..., description="User prompt to test on Qwen3-0.6B")
-    system_prompt: Optional[str] = Field(default=None)
+    prompt: str = Field(..., min_length=1, max_length=8192, description="User prompt to test on Qwen3-0.6B (1 ~ 8,192 chars)")
+    system_prompt: Optional[str] = Field(default=None, max_length=4096)
     max_new_tokens: Optional[int] = Field(default=None, ge=16, le=1024)
     temperature: Optional[float] = Field(default=None, ge=0.0, le=1.5)
     enable_thinking: Optional[bool] = Field(default=None)
     guarded: bool = Field(default=True, description="Enable 3-stage Qwen3Guard protection")
     compare_unguarded: bool = Field(default=True, description="Also run unguarded Qwen3-0.6B for side-by-side comparison")
-    api_key: Optional[str] = None
+    api_key: Optional[str] = Field(default=None, max_length=128)
 
 
 class ChatMessage(BaseModel):
-    role: str
-    content: str
+    role: str = Field(..., pattern="^(system|user|assistant|tool)$", description="Message role: system | user | assistant | tool")
+    content: str = Field(..., min_length=1, max_length=16384, description="Message text content (1 ~ 16,384 chars)")
 
 
 class ChatCompletionRequest(BaseModel):
-    model: str = Field(default="Qwen3-0.6B-Guarded")
-    messages: List[ChatMessage]
-    max_tokens: Optional[int] = Field(default=220)
-    temperature: Optional[float] = Field(default=0.6)
+    model: str = Field(default="Qwen3-0.6B-Guarded", min_length=1, max_length=64)
+    messages: List[ChatMessage] = Field(..., min_length=1, max_length=64, description="Conversation message list (1 ~ 64 turns)")
+    max_tokens: Optional[int] = Field(default=220, ge=1, le=2048, description="Max generated tokens (1 ~ 2,048)")
+    temperature: Optional[float] = Field(default=0.6, ge=0.0, le=2.0, description="Sampling temperature (0.0 ~ 2.0)")
     guarded: bool = Field(default=True)
-    api_key: Optional[str] = None
+    api_key: Optional[str] = Field(default=None, max_length=128)
 
 
 class TC260SelfTestRequest(BaseModel):
-    dataset: str = Field(default="curated", description="'curated' (142 stratified cases) or 'full' (1607 cases)")
+    dataset: str = Field(default="curated", pattern="^(curated|full)$", description="'curated' (142 stratified cases) or 'full' (1607 cases)")
     max_cases: int = Field(default=142, ge=5, le=1610)
-    major_code: Optional[str] = Field(default=None, description="Filter by A.1..A.5 or BENIGN")
+    major_code: Optional[str] = Field(default=None, max_length=16, description="Filter by A.1..A.5 or BENIGN")
     include_stream_check: bool = Field(default=True)
 
 
@@ -420,7 +420,20 @@ async def guard_output(req: LegacyGuardOutputRequest, request: Request):
 async def openai_moderations(req: ModerationsRequest, request: Request):
     key_obj = resolve_request_key(request, req.api_key)
     eff_cfg = get_effective_config_for_key(key_obj)
-    inputs = [req.input] if isinstance(req.input, str) else list(req.input)
+    if isinstance(req.input, str):
+        if len(req.input) < 1 or len(req.input) > 16384:
+            raise HTTPException(status_code=422, detail="Parameter boundary violation: 'input' string length must be between 1 and 16,384 characters.")
+        inputs = [req.input]
+    elif isinstance(req.input, list):
+        if len(req.input) < 1 or len(req.input) > 32:
+            raise HTTPException(status_code=422, detail="Parameter boundary violation: 'input' array length must be between 1 and 32 items.")
+        for idx, it in enumerate(req.input):
+            s = str(it or "")
+            if len(s) < 1 or len(s) > 16384:
+                raise HTTPException(status_code=422, detail=f"Parameter boundary violation: 'input[{idx}]' length must be between 1 and 16,384 characters.")
+        inputs = list(req.input)
+    else:
+        raise HTTPException(status_code=422, detail="Parameter boundary violation: 'input' must be a non-empty string or list of strings.")
     results = []
     for item in inputs:
         det = model_manager.detect_with_gen(prompt=str(item), response=None, cfg=eff_cfg)

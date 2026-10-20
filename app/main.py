@@ -16,7 +16,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.config import DATA_DIR, ROOT_DIR, RuntimeConfig, config_manager
 from app.model_manager import model_manager
@@ -265,17 +265,33 @@ async def add_enterprise_gateway_headers(request: Request, call_next):
 
 
 # -------------------- Request Schemas (with Strict Boundary Constraints) --------------------
+def _require_non_blank_str(val: str, field_name: str) -> str:
+    if not isinstance(val, str) or not val.strip():
+        raise ValueError(f"Parameter boundary violation: '{field_name}' must not be empty or whitespace-only.")
+    return val
+
+
 class GuardDetectRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=16384, description="User input text to inspect (1 ~ 16,384 chars)")
     response: Optional[str] = Field(default=None, max_length=32768, description="Optional assistant response text to inspect (0 ~ 32,768 chars)")
     include_stream_tokens: bool = Field(default=False, description="Also run Qwen3Guard-Stream token-level analysis")
     api_key: Optional[str] = Field(default=None, max_length=128, description="Optional API key token or ID override")
 
+    @field_validator("prompt")
+    @classmethod
+    def _validate_prompt(cls, v: str) -> str:
+        return _require_non_blank_str(v, "prompt")
+
 
 class BatchGuardItem(BaseModel):
     id: Optional[str] = Field(default=None, max_length=64, description="Caller custom item ID (max 64 chars)")
     prompt: str = Field(..., min_length=1, max_length=8192, description="User input text to inspect (1 ~ 8,192 chars)")
     response: Optional[str] = Field(default=None, max_length=16384, description="Optional assistant response text (0 ~ 16,384 chars)")
+
+    @field_validator("prompt")
+    @classmethod
+    def _validate_prompt(cls, v: str) -> str:
+        return _require_non_blank_str(v, "prompt")
 
 
 class BatchGuardRequest(BaseModel):
@@ -288,17 +304,32 @@ class DeobfuscateRequest(BaseModel):
     mask_pii: bool = Field(default=True, description="Whether to return masked PII text")
     api_key: Optional[str] = Field(default=None, max_length=128, description="Optional API key token or ID override")
 
+    @field_validator("text")
+    @classmethod
+    def _validate_text(cls, v: str) -> str:
+        return _require_non_blank_str(v, "text")
+
 
 class LegacyGuardInputRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=16384, description="Input text (1 ~ 16,384 chars)")
     context: Optional[Dict[str, Any]] = None
     api_key: Optional[str] = Field(default=None, max_length=128)
 
+    @field_validator("text")
+    @classmethod
+    def _validate_text(cls, v: str) -> str:
+        return _require_non_blank_str(v, "text")
+
 
 class LegacyGuardOutputRequest(BaseModel):
     prompt: Optional[str] = Field(default="", max_length=16384, description="Original user prompt (0 ~ 16,384 chars)")
     text: str = Field(..., min_length=1, max_length=32768, description="Model output text (1 ~ 32,768 chars)")
     api_key: Optional[str] = Field(default=None, max_length=128)
+
+    @field_validator("text")
+    @classmethod
+    def _validate_text(cls, v: str) -> str:
+        return _require_non_blank_str(v, "text")
 
 
 class ModerationsRequest(BaseModel):
@@ -313,6 +344,11 @@ class StreamGuardRequest(BaseModel):
     chunk_delay_ms: int = Field(default=15, ge=0, le=500, description="Simulated delay per token for SSE visualization (0 ~ 500 ms)")
     api_key: Optional[str] = Field(default=None, max_length=128)
 
+    @field_validator("prompt")
+    @classmethod
+    def _validate_prompt(cls, v: str) -> str:
+        return _require_non_blank_str(v, "prompt")
+
 
 class DynamicLLMRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=8192, description="User prompt to test on Qwen3-0.6B (1 ~ 8,192 chars)")
@@ -324,10 +360,20 @@ class DynamicLLMRequest(BaseModel):
     compare_unguarded: bool = Field(default=True, description="Also run unguarded Qwen3-0.6B for side-by-side comparison")
     api_key: Optional[str] = Field(default=None, max_length=128)
 
+    @field_validator("prompt")
+    @classmethod
+    def _validate_prompt(cls, v: str) -> str:
+        return _require_non_blank_str(v, "prompt")
+
 
 class ChatMessage(BaseModel):
     role: str = Field(..., pattern="^(system|user|assistant|tool)$", description="Message role: system | user | assistant | tool")
     content: str = Field(..., min_length=1, max_length=16384, description="Message text content (1 ~ 16,384 chars)")
+
+    @field_validator("content")
+    @classmethod
+    def _validate_content(cls, v: str) -> str:
+        return _require_non_blank_str(v, "content")
 
 
 class ChatCompletionRequest(BaseModel):
@@ -335,6 +381,7 @@ class ChatCompletionRequest(BaseModel):
     messages: List[ChatMessage] = Field(..., min_length=1, max_length=64, description="Conversation message list (1 ~ 64 turns)")
     max_tokens: Optional[int] = Field(default=220, ge=1, le=2048, description="Max generated tokens (1 ~ 2,048)")
     temperature: Optional[float] = Field(default=0.6, ge=0.0, le=2.0, description="Sampling temperature (0.0 ~ 2.0)")
+    stream: bool = Field(default=False, description="Whether to stream back partial chunks via SSE (OpenAI compatible)")
     guarded: bool = Field(default=True)
     api_key: Optional[str] = Field(default=None, max_length=128)
 
@@ -531,17 +578,19 @@ async def openai_moderations(req: ModerationsRequest, request: Request):
     key_obj = resolve_request_key(request, req.api_key)
     eff_cfg = get_effective_config_for_key(key_obj)
     if isinstance(req.input, str):
-        if len(req.input) < 1 or len(req.input) > 16384:
-            raise HTTPException(status_code=422, detail="Parameter boundary violation: 'input' string length must be between 1 and 16,384 characters.")
+        if len(req.input.strip()) < 1 or len(req.input) > 16384:
+            raise HTTPException(status_code=422, detail="Parameter boundary violation: 'input' string must be non-blank and between 1 and 16,384 characters.")
         inputs = [req.input]
     elif isinstance(req.input, list):
         if len(req.input) < 1 or len(req.input) > 32:
             raise HTTPException(status_code=422, detail="Parameter boundary violation: 'input' array length must be between 1 and 32 items.")
+        inputs = []
         for idx, it in enumerate(req.input):
-            s = str(it or "")
-            if len(s) < 1 or len(s) > 16384:
-                raise HTTPException(status_code=422, detail=f"Parameter boundary violation: 'input[{idx}]' length must be between 1 and 16,384 characters.")
-        inputs = list(req.input)
+            if not isinstance(it, str):
+                raise HTTPException(status_code=422, detail=f"Parameter boundary violation: 'input[{idx}]' must be a string, got {type(it).__name__}.")
+            if len(it.strip()) < 1 or len(it) > 16384:
+                raise HTTPException(status_code=422, detail=f"Parameter boundary violation: 'input[{idx}]' must be non-blank and between 1 and 16,384 characters.")
+            inputs.append(it)
     else:
         raise HTTPException(status_code=422, detail="Parameter boundary violation: 'input' must be a non-empty string or list of strings.")
     results = []
@@ -766,6 +815,21 @@ async def get_platform_api_catalog():
             {"http_status": 422, "code": "VALIDATION_ERROR", "description": "请求体 JSON 格式错误或缺少必填字段"},
             {"http_status": 429, "code": "RATE_LIMIT_EXCEEDED", "description": "超出当前 API Key 配置的 QPS 限流配额"},
         ],
+        "endpoints": [
+            {"id": "/v1/guard/detect", "method": "POST", "path": "/v1/guard/detect", "name": "全链路综合安全与 TC260 合规检测", "stage": "All-in-One", "request_schema": "GuardDetectRequest"},
+            {"id": "/v1/guard/input", "method": "POST", "path": "/v1/guard/input", "name": "第一道防线：用户输入前置拦截护栏", "stage": "Input Guard", "request_schema": "LegacyGuardInputRequest"},
+            {"id": "/v1/guard/output", "method": "POST", "path": "/v1/guard/output", "name": "第三道防线：模型输出后置复核护栏", "stage": "Output Guard", "request_schema": "LegacyGuardOutputRequest"},
+            {"id": "/v1/guard/stream", "method": "POST", "path": "/v1/guard/stream", "name": "第二道防线：流式 Token 级实时熔断 (JSON)", "stage": "Stream Guard", "request_schema": "StreamGuardRequest"},
+            {"id": "/v1/guard/stream/sse", "method": "POST", "path": "/v1/guard/stream/sse", "name": "第二道防线：流式 SSE 事件流实时推送", "stage": "Stream SSE Guard", "request_schema": "StreamGuardRequest"},
+            {"id": "/v1/guard/batch", "method": "POST", "path": "/v1/guard/batch", "name": "平台级高吞吐批量并发合规检测", "stage": "Batch Guard", "request_schema": "BatchGuardRequest"},
+            {"id": "/v1/guard/deobfuscate", "method": "POST", "path": "/v1/guard/deobfuscate", "name": "反混淆拆包与敏感隐私 (PII) 脱敏清洗", "stage": "Deobfuscate & PII", "request_schema": "DeobfuscateRequest"},
+            {"id": "/v1/chat/completions", "method": "POST", "path": "/v1/chat/completions", "name": "OpenAI 兼容三阶安全护栏对话生成网关", "stage": "Chat Completions", "request_schema": "ChatCompletionRequest"},
+            {"id": "/v1/moderations", "method": "POST", "path": "/v1/moderations", "name": "OpenAI Moderations 标准审核协议无缝平替", "stage": "Moderations", "request_schema": "ModerationsRequest"},
+            {"id": "/v1/guard/categories", "method": "GET", "path": "/v1/guard/categories", "name": "查询 TC260 国标 5 大类 31 子类完整字典", "stage": "Metadata", "request_schema": None},
+            {"id": "/v1/platform/catalog", "method": "GET", "path": "/v1/platform/catalog", "name": "获取 REST API 开放平台全接口规范目录", "stage": "Discovery", "request_schema": None},
+            {"id": "/api/audit/logs", "method": "GET", "path": "/api/audit/logs", "name": "按 API Key 与风险维度分页拉取审计流水", "stage": "Audit API", "request_schema": "QueryParams"},
+            {"id": "/api/audit/summary", "method": "GET", "path": "/api/audit/summary", "name": "获取全量 API Key 审计对账与总报告关联汇总", "stage": "Audit Summary API", "request_schema": None},
+        ],
     }
 
 
@@ -896,18 +960,62 @@ async def openai_chat_completions(req: ChatCompletionRequest, request: Request):
         result=_select_llm_audit_result(gen),
         final_output=gen.get("final_response", ""),
     )
+    cmpl_id = f"chatcmpl-{int(time.time()*1000)}"
+    created_ts = int(time.time())
+    finish_reason = "content_filter" if gen["blocked"] else "stop"
+
+    if req.stream:
+        async def _openai_sse_stream():
+            role_chunk = {
+                "id": cmpl_id,
+                "audit_id": audit_entry["audit_id"],
+                "object": "chat.completion.chunk",
+                "created": created_ts,
+                "model": req.model,
+                "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
+            }
+            yield f"data: {json.dumps(role_chunk, ensure_ascii=False)}\n\n"
+            text = gen["final_response"] or ""
+            chunk_size = 12
+            for i in range(0, len(text), chunk_size):
+                piece = text[i : i + chunk_size]
+                content_chunk = {
+                    "id": cmpl_id,
+                    "object": "chat.completion.chunk",
+                    "created": created_ts,
+                    "model": req.model,
+                    "choices": [{"index": 0, "delta": {"content": piece}, "finish_reason": None}],
+                }
+                yield f"data: {json.dumps(content_chunk, ensure_ascii=False)}\n\n"
+            done_chunk = {
+                "id": cmpl_id,
+                "audit_id": audit_entry["audit_id"],
+                "object": "chat.completion.chunk",
+                "created": created_ts,
+                "model": req.model,
+                "choices": [{"index": 0, "delta": {}, "finish_reason": finish_reason}],
+                "guardrail": {
+                    "blocked": gen["blocked"],
+                    "blocked_stage": gen["blocked_stage"],
+                },
+            }
+            yield f"data: {json.dumps(done_chunk, ensure_ascii=False)}\n\n"
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(_openai_sse_stream(), media_type="text/event-stream")
+
     return {
-        "id": f"chatcmpl-{int(time.time()*1000)}",
+        "id": cmpl_id,
         "audit_id": audit_entry["audit_id"],
         "api_key": {"id": key_obj["id"], "name": key_obj["name"], "prefix": key_obj["prefix"]},
         "object": "chat.completion",
-        "created": int(time.time()),
+        "created": created_ts,
         "model": req.model,
         "choices": [
             {
                 "index": 0,
                 "message": {"role": "assistant", "content": gen["final_response"]},
-                "finish_reason": "content_filter" if gen["blocked"] else "stop",
+                "finish_reason": finish_reason,
             }
         ],
         "guardrail": {
@@ -1200,6 +1308,7 @@ async def get_audit_summary():
 
 @app.get("/api/audit/logs")
 async def get_audit_logs(
+    request: Request,
     api_key_id: Optional[str] = Query(default=None),
     action: Optional[str] = Query(default=None),
     risk_level: Optional[str] = Query(default=None),
@@ -1210,6 +1319,7 @@ async def get_audit_logs(
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=500),
 ):
+    resolve_request_key(request)
     queried = platform_store.query_audit_logs(
         api_key_id=api_key_id,
         action=action,
@@ -1230,7 +1340,8 @@ async def get_audit_logs(
 
 
 @app.get("/api/audit/logs/{audit_id}")
-async def get_single_audit_log(audit_id: str):
+async def get_single_audit_log(audit_id: str, request: Request):
+    resolve_request_key(request)
     entry = platform_store.get_audit_entry(audit_id)
     if not entry:
         raise HTTPException(status_code=404, detail=f"Audit entry {audit_id} not found")
@@ -1238,7 +1349,8 @@ async def get_single_audit_log(audit_id: str):
 
 
 @app.put("/api/audit/logs/{audit_id}/review")
-async def review_audit_log(audit_id: str, payload: Dict[str, Any]):
+async def review_audit_log(audit_id: str, payload: Dict[str, Any], request: Request):
+    resolve_request_key(request)
     review_status = str(payload.get("review_status", "confirmed_risk"))
     reviewer_note = str(payload.get("reviewer_note", ""))
     sync_keyword = payload.get("sync_keyword")
@@ -1254,7 +1366,8 @@ async def review_audit_log(audit_id: str, payload: Dict[str, Any]):
 
 
 @app.post("/api/audit/logs/{audit_id}/promote-to-qbank")
-async def promote_audit_log_to_qbank(audit_id: str, payload: Optional[Dict[str, Any]] = None):
+async def promote_audit_log_to_qbank(audit_id: str, request: Request, payload: Optional[Dict[str, Any]] = None):
+    resolve_request_key(request)
     dataset = str((payload or {}).get("dataset", "curated"))
     created_case = platform_store.promote_audit_to_qbank(audit_id, dataset=dataset)
     if not created_case:
@@ -1265,11 +1378,13 @@ async def promote_audit_log_to_qbank(audit_id: str, payload: Optional[Dict[str, 
 
 @app.get("/api/audit/export")
 async def export_audit_logs(
+    request: Request,
     format: str = Query(default="csv"),
     api_key_id: Optional[str] = Query(default=None),
 ):
+    resolve_request_key(request)
     if format.lower() == "json":
-        queried = platform_store.query_audit_logs(api_key_id=api_key_id, offset=0, limit=2000)
+        queried = platform_store.query_audit_logs(api_key_id=api_key_id, offset=0, limit=None)
         return {
             "exported_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             "api_key_id": api_key_id or "ALL",
@@ -1286,7 +1401,8 @@ async def export_audit_logs(
 
 
 @app.delete("/api/audit/logs")
-async def clear_audit_logs(api_key_id: Optional[str] = Query(default=None)):
+async def clear_audit_logs(request: Request, api_key_id: Optional[str] = Query(default=None)):
+    resolve_request_key(request)
     removed = platform_store.clear_audit_logs(api_key_id=api_key_id)
     return {"status": "cleared", "removed_count": removed}
 

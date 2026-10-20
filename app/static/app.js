@@ -293,6 +293,31 @@ function getSelectedArenaKeyId() {
   return (el && el.value) ? el.value : (cachedApiKeys[0] ? cachedApiKeys[0].id : '');
 }
 
+function getSecretTokenForKeyId(keyId) {
+  if (keyId) {
+    const matched = (cachedApiKeys || []).find(k => k.id === keyId || k.token === keyId);
+    if (matched && matched.token) return matched.token;
+  }
+  const fallback = (cachedApiKeys || []).find(k => k.enabled !== false) || cachedApiKeys[0];
+  return fallback ? fallback.token : (keyId || '');
+}
+
+function buildConsoleAuthHeaders(keyId = '', includeJsonContent = false) {
+  const headers = {};
+  if (includeJsonContent) {
+    headers['Content-Type'] = 'application/json';
+  }
+  const secretToken = getSecretTokenForKeyId(keyId);
+  if (secretToken) {
+    headers['X-API-Key'] = secretToken;
+    headers['Authorization'] = `Bearer ${secretToken}`;
+  }
+  if (keyId) {
+    headers['X-API-Key-Id'] = keyId;
+  }
+  return headers;
+}
+
 // -------------------- 1. Executive Dashboard & Status --------------------
 async function refreshStatus() {
   try {
@@ -360,7 +385,9 @@ async function refreshStatus() {
 
 async function loadAuditLogs() {
   try {
-    const res = await fetch('/api/audit/logs?limit=12');
+    const res = await fetch('/api/audit/logs?limit=12', {
+      headers: buildConsoleAuthHeaders()
+    });
     const data = await res.json();
     const tbody = document.getElementById('dash-audit-tbody');
     if (data.summary && data.summary.overview) {
@@ -1358,6 +1385,7 @@ const REST_API_PORTAL_SPECS = [
       { name: 'messages', type: 'array<object>', required: true, boundary: '1 ~ 64 轮; role∈{system,user,assistant,tool}; content 1~16384字', defaultVal: [{ role: 'user', content: '你好！请用三句话介绍企业部署大模型安全护栏的核心价值。' }], desc: 'OpenAI 标准对话消息数组：[{"role": "user", "content": "..."}]', inputType: 'json' },
       { name: 'max_tokens', type: 'integer', required: false, boundary: '1 ~ 2,048 Tokens (默认 220)', defaultVal: 120, desc: '最大生成 Token 数', inputType: 'number' },
       { name: 'temperature', type: 'number', required: false, boundary: '0.0 ~ 2.0 (默认 0.6)', defaultVal: 0.6, desc: '采样温度 (0.0 ~ 2.0)', inputType: 'number' },
+      { name: 'stream', type: 'boolean', required: false, boundary: 'true | false (默认 false)', defaultVal: false, desc: '是否启用 OpenAI 标准 SSE 流式分片返回 (chat.completion.chunk)', inputType: 'boolean' },
       { name: 'guarded', type: 'boolean', required: false, boundary: 'true | false (默认 true)', defaultVal: true, desc: '是否启用 Qwen3Guard 三阶安全护栏保护', inputType: 'boolean' }
     ],
     resParams: [
@@ -2076,7 +2104,8 @@ async function executeApiPortalRequest() {
     }
   }
 
-  let reqUrl = spec.path;
+  const baseUrl = ((document.getElementById('ap-base-url') && document.getElementById('ap-base-url').value) || window.location.origin).replace(/\/$/, '');
+  let reqUrl = `${baseUrl}${spec.path}`;
   const fetchOpts = { method: spec.method, headers };
   if (spec.method === 'GET') {
     const qs = new URLSearchParams();
@@ -2136,6 +2165,44 @@ async function executeApiPortalRequest() {
         ${auditId ? `<code>${escapeHtml(auditId)}</code> <button class="btn secondary sm" style="padding:2px 7px; font-size:11px;" onclick="openAuditDetailModal('${escapeHtml(auditId)}')">🔍 审计详情</button>` : ''}
       `;
       renderApiPortalVisualResult(spec, { ...(summaryData || {}), token_stream: tokenEvents }, res.status);
+      loadAuditLogs();
+      return;
+    }
+
+    // Special handling for OpenAI Chat Completions SSE stream (stream: true)
+    if (spec.path === '/v1/chat/completions' && payloadObj && payloadObj.stream && res.ok) {
+      const rawText = await res.text();
+      rawBox.textContent = rawText;
+      const frames = rawText.split('\n\n').map(l => l.replace(/^data:\s*/, '').trim()).filter(l => l && l !== '[DONE]');
+      let fullContent = '';
+      let finishReason = 'stop';
+      let guardrailObj = { blocked: false, blocked_stage: null };
+      let auditId = '';
+      let cmplId = '';
+      frames.forEach(f => {
+        try {
+          const parsed = JSON.parse(f);
+          if (parsed.id) cmplId = parsed.id;
+          if (parsed.audit_id) auditId = parsed.audit_id;
+          if (parsed.guardrail) guardrailObj = parsed.guardrail;
+          const ch = parsed.choices && parsed.choices[0];
+          if (ch) {
+            if (ch.delta && ch.delta.content) fullContent += ch.delta.content;
+            if (ch.finish_reason) finishReason = ch.finish_reason;
+          }
+        } catch (e) {}
+      });
+      metaEl.innerHTML = `
+        <span class="badge safe">HTTP ${res.status} OK (OpenAI SSE Stream)</span>
+        <span class="badge info">⏱ ${procMsHdr} ms</span>
+        ${auditId ? `<code>${escapeHtml(auditId)}</code> <button class="btn secondary sm" style="padding:2px 7px; font-size:11px;" onclick="openAuditDetailModal('${escapeHtml(auditId)}')">🔍 审计详情</button>` : ''}
+      `;
+      renderApiPortalVisualResult(spec, {
+        id: cmplId,
+        audit_id: auditId,
+        choices: [{ index: 0, message: { role: 'assistant', content: fullContent }, finish_reason: finishReason }],
+        guardrail: guardrailObj
+      }, res.status);
       loadAuditLogs();
       return;
     }
@@ -2379,7 +2446,9 @@ async function loadAuditManagement(offset = 0) {
   if (rev) params.set('review_status', rev);
   if (q) params.set('q', q);
 
-  const res = await fetch(`/api/audit/logs?${params.toString()}`);
+  const res = await fetch(`/api/audit/logs?${params.toString()}`, {
+    headers: buildConsoleAuthHeaders(keyId)
+  });
   const data = await res.json();
   audTotalMatched = data.total_matched || 0;
   audLoadedLogs = data.logs || [];
@@ -2926,6 +2995,7 @@ function setAuditSimPreset(key) {
 
 async function runAuditKeySimulator() {
   const keyId = document.getElementById('aud-sim-key').value;
+  const secretToken = getSecretTokenForKeyId(keyId);
   const ep = document.getElementById('aud-sim-ep').value;
   const prompt = document.getElementById('aud-sim-prompt').value.trim();
   const respText = document.getElementById('aud-sim-resp').value.trim();
@@ -2940,17 +3010,17 @@ async function runAuditKeySimulator() {
 
   let body = {};
   if (ep === '/v1/guard/detect') {
-    body = { prompt, response: respText || null, include_stream_tokens: false, api_key: keyId };
+    body = { prompt, response: respText || null, include_stream_tokens: false, api_key: secretToken };
   } else if (ep === '/v1/guard/input') {
-    body = { text: prompt, api_key: keyId };
+    body = { text: prompt, api_key: secretToken };
   } else if (ep === '/v1/guard/output') {
-    body = { prompt, text: respText || prompt, api_key: keyId };
+    body = { prompt, text: respText || prompt, api_key: secretToken };
   } else if (ep === '/v1/guard/stream') {
-    body = { prompt, response: respText || prompt, api_key: keyId };
+    body = { prompt, response: respText || prompt, api_key: secretToken };
   } else if (ep === '/v1/chat/completions') {
-    body = { model: 'Qwen3-0.6B-Guarded', messages: [{ role: 'user', content: prompt }], max_tokens: 96, guarded: true, api_key: keyId };
+    body = { model: 'Qwen3-0.6B-Guarded', messages: [{ role: 'user', content: prompt }], max_tokens: 96, guarded: true, api_key: secretToken };
   } else if (ep === '/v1/moderations') {
-    body = { input: prompt, model: 'Qwen3Guard-Gen-0.6B', api_key: keyId };
+    body = { input: prompt, model: 'Qwen3Guard-Gen-0.6B', api_key: secretToken };
   }
 
   const ioBox = document.getElementById('aud-sim-io-compare');
@@ -2966,10 +3036,7 @@ async function runAuditKeySimulator() {
 
   const res = await fetch(ep, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-API-Key-Id': keyId
-    },
+    headers: buildConsoleAuthHeaders(keyId, true),
     body: JSON.stringify(body)
   });
 
@@ -3007,7 +3074,9 @@ async function runAuditKeySimulator() {
 
 async function openAuditDetailModal(auditId) {
   if (!auditId) return;
-  const res = await fetch(`/api/audit/logs/${encodeURIComponent(auditId)}`);
+  const res = await fetch(`/api/audit/logs/${encodeURIComponent(auditId)}`, {
+    headers: buildConsoleAuthHeaders()
+  });
   if (!res.ok) return;
   const e = await res.json();
   const tc = e.tc260 || {};
@@ -3085,7 +3154,7 @@ async function submitAuditReviewModal() {
 
   const res = await fetch(`/api/audit/logs/${encodeURIComponent(auditId)}/review`, {
     method: 'PUT',
-    headers: {'Content-Type': 'application/json'},
+    headers: buildConsoleAuthHeaders('', true),
     body: JSON.stringify({ review_status, reviewer_note, sync_keyword })
   });
   if (res.ok) {
@@ -3098,7 +3167,7 @@ async function submitAuditReviewModal() {
 async function promoteAuditToQBank(auditId) {
   const res = await fetch(`/api/audit/logs/${encodeURIComponent(auditId)}/promote-to-qbank`, {
     method: 'POST',
-    headers: {'Content-Type': 'application/json'},
+    headers: buildConsoleAuthHeaders('', true),
     body: JSON.stringify({ dataset: 'curated' })
   });
   if (res.ok) {
@@ -3113,7 +3182,7 @@ async function promoteAuditModalToQBank() {
   const auditId = document.getElementById('mad-audit-id').value;
   const res = await fetch(`/api/audit/logs/${encodeURIComponent(auditId)}/promote-to-qbank`, {
     method: 'POST',
-    headers: {'Content-Type': 'application/json'},
+    headers: buildConsoleAuthHeaders('', true),
     body: JSON.stringify({ dataset: 'curated' })
   });
   if (res.ok) {
@@ -3126,7 +3195,8 @@ async function promoteAuditModalToQBank() {
 
 function exportAuditLogs(fmt) {
   const keyId = document.getElementById('aud-filter-key').value;
-  const url = `/api/audit/export?format=${encodeURIComponent(fmt)}${keyId ? '&api_key_id=' + encodeURIComponent(keyId) : ''}`;
+  const secretToken = getSecretTokenForKeyId(keyId);
+  const url = `/api/audit/export?format=${encodeURIComponent(fmt)}${keyId ? '&api_key_id=' + encodeURIComponent(keyId) : ''}${secretToken ? '&api_key=' + encodeURIComponent(secretToken) : ''}`;
   window.open(url, '_blank');
 }
 
@@ -3134,7 +3204,10 @@ async function clearCurrentAuditLogs() {
   const keyId = document.getElementById('aud-filter-key').value;
   const msg = keyId ? `确定清空业务密钥 [${keyId}] 的审计记录吗？` : '确定清空全部审计记录吗？';
   if (!confirm(msg)) return;
-  await fetch(`/api/audit/logs${keyId ? '?api_key_id=' + encodeURIComponent(keyId) : ''}`, { method: 'DELETE' });
+  await fetch(`/api/audit/logs${keyId ? '?api_key_id=' + encodeURIComponent(keyId) : ''}`, {
+    method: 'DELETE',
+    headers: buildConsoleAuthHeaders(keyId)
+  });
   loadGatewayConfig();
   loadAuditManagement(0);
 }
@@ -3381,6 +3454,7 @@ async function runDetect(includeStream) {
   const prompt = document.getElementById('det-prompt').value;
   const response = document.getElementById('det-response').value || null;
   const keyId = getSelectedArenaKeyId();
+  const secretToken = getSecretTokenForKeyId(keyId);
   const badge = document.getElementById('det-badge');
   const panel = document.getElementById('det-result-panel');
   badge.className = 'badge info';
@@ -3388,11 +3462,8 @@ async function runDetect(includeStream) {
 
   const res = await fetch('/v1/guard/detect', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-API-Key-Id': keyId
-    },
-    body: JSON.stringify({ prompt, response, include_stream_tokens: includeStream, api_key: keyId })
+    headers: buildConsoleAuthHeaders(keyId, true),
+    body: JSON.stringify({ prompt, response, include_stream_tokens: includeStream, api_key: secretToken })
   });
   const data = await res.json();
   loadAuditLogs();
@@ -3459,15 +3530,13 @@ async function runStreamBatch() {
   const prompt = document.getElementById('str-prompt').value;
   const response = document.getElementById('str-response').value || null;
   const keyId = getSelectedArenaKeyId();
+  const secretToken = getSecretTokenForKeyId(keyId);
   const box = document.getElementById('str-tokens');
   box.innerHTML = '';
   const res = await fetch('/v1/guard/stream', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-API-Key-Id': keyId
-    },
-    body: JSON.stringify({ prompt, response, api_key: keyId })
+    headers: buildConsoleAuthHeaders(keyId, true),
+    body: JSON.stringify({ prompt, response, api_key: secretToken })
   });
   const data = await res.json();
   loadAuditLogs();
@@ -3482,17 +3551,15 @@ async function runStreamSSE() {
   const prompt = document.getElementById('str-prompt').value;
   const response = document.getElementById('str-response').value || null;
   const keyId = getSelectedArenaKeyId();
+  const secretToken = getSecretTokenForKeyId(keyId);
   const box = document.getElementById('str-tokens');
   box.innerHTML = '';
   document.getElementById('str-badge').textContent = 'SSE 实时扫描中...';
 
   const res = await fetch('/v1/guard/stream/sse', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-API-Key-Id': keyId
-    },
-    body: JSON.stringify({ prompt, response, chunk_delay_ms: 25, api_key: keyId })
+    headers: buildConsoleAuthHeaders(keyId, true),
+    body: JSON.stringify({ prompt, response, chunk_delay_ms: 25, api_key: secretToken })
   });
   const reader = res.body.getReader();
   const decoder = new TextDecoder('utf-8');
@@ -3553,22 +3620,20 @@ function setLLMPreset(key) {
 async function runDynamicLLMCompare() {
   const prompt = document.getElementById('llm-prompt').value;
   const keyId = getSelectedArenaKeyId();
+  const secretToken = getSecretTokenForKeyId(keyId);
   const box = document.getElementById('llm-compare-box');
   box.innerHTML = '<div style="color:var(--primary);">⏳ 正在 GPU 上执行 Qwen3-0.6B 裸奔生成 vs Qwen3Guard 三阶全链路防护生成并写入审计...</div>';
 
   const res = await fetch('/api/dynamic-llm/generate', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-API-Key-Id': keyId
-    },
+    headers: buildConsoleAuthHeaders(keyId, true),
     body: JSON.stringify({
       prompt,
       system_prompt: "You are a helpful assistant.",
       max_new_tokens: 96,
       guarded: true,
       compare_unguarded: true,
-      api_key: keyId
+      api_key: secretToken
     })
   });
   const data = await res.json();

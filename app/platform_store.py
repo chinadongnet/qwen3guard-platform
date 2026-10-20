@@ -4,7 +4,9 @@ from __future__ import annotations
 import csv
 import io
 import json
+import os
 import secrets
+import threading
 import time
 from collections import Counter
 from pathlib import Path
@@ -597,6 +599,7 @@ class PlatformStore:
     """Manages Question Bank CRUD, API Gateway configuration, Full-Trace Audit Logs, and Report Correlation."""
 
     def __init__(self) -> None:
+        self._audit_lock = threading.RLock()
         self.gateway_config = self._load_gateway_config()
         self.audit_logs: List[Dict[str, Any]] = self._load_audit_logs()
         self._sync_key_counters_from_logs()
@@ -616,12 +619,15 @@ class PlatformStore:
         return dict(DEFAULT_GATEWAY_CONFIG)
 
     def _save_gateway_config(self, cfg: Dict[str, Any]) -> Dict[str, Any]:
-        self.gateway_config = cfg
-        GATEWAY_CONFIG_PATH.write_text(
-            json.dumps(cfg, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        return cfg
+        with self._audit_lock:
+            self.gateway_config = cfg
+            tmp_path = GATEWAY_CONFIG_PATH.with_suffix(".json.tmp")
+            tmp_path.write_text(
+                json.dumps(cfg, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            os.replace(tmp_path, GATEWAY_CONFIG_PATH)
+            return cfg
 
     def _load_audit_logs(self) -> List[Dict[str, Any]]:
         if AUDIT_LOGS_PATH.exists():
@@ -636,46 +642,57 @@ class PlatformStore:
         return seeds
 
     def _save_audit_logs(self, logs: Optional[List[Dict[str, Any]]] = None) -> None:
-        if logs is not None:
-            self.audit_logs = logs
-        retention = int(self.gateway_config.get("audit_retention_count", 2000))
-        if len(self.audit_logs) > retention:
-            self.audit_logs = self.audit_logs[:retention]
-        AUDIT_LOGS_PATH.write_text(
-            json.dumps(self.audit_logs, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        with self._audit_lock:
+            if logs is not None:
+                self.audit_logs = logs
+            retention = int(self.gateway_config.get("audit_retention_count", 2000))
+            if len(self.audit_logs) > retention:
+                self.audit_logs = self.audit_logs[:retention]
+            tmp_path = AUDIT_LOGS_PATH.with_suffix(".json.tmp")
+            tmp_path.write_text(
+                json.dumps(self.audit_logs, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            os.replace(tmp_path, AUDIT_LOGS_PATH)
 
     def _sync_key_counters_from_logs(self) -> None:
         """Synchronize per-key call/safe/blocked counters with actual stored audit logs."""
-        by_key: Dict[str, Dict[str, Any]] = {}
-        for entry in self.audit_logs:
-            kid = entry.get("api_key_id", "key_console")
-            st = by_key.setdefault(kid, {"calls": 0, "safe_calls": 0, "blocked_calls": 0, "last_used_at": "-"})
-            st["calls"] += 1
-            if entry.get("is_safe", True):
-                st["safe_calls"] += 1
-            else:
-                st["blocked_calls"] += 1
-            if st["last_used_at"] == "-":
-                st["last_used_at"] = entry.get("timestamp", "-")
+        with self._audit_lock:
+            by_key: Dict[str, Dict[str, Any]] = {}
+            for entry in self.audit_logs:
+                kid = entry.get("api_key_id", "key_console")
+                st = by_key.setdefault(kid, {"calls": 0, "safe_calls": 0, "blocked_calls": 0, "last_used_at": "-"})
+                st["calls"] += 1
+                if entry.get("is_safe", True):
+                    st["safe_calls"] += 1
+                else:
+                    st["blocked_calls"] += 1
+                if st["last_used_at"] == "-":
+                    st["last_used_at"] = entry.get("timestamp", "-")
 
-        changed = False
-        for k in self.gateway_config.get("api_keys", []):
-            kid = k["id"]
-            if kid in by_key:
-                k["calls"] = by_key[kid]["calls"]
-                k["safe_calls"] = by_key[kid]["safe_calls"]
-                k["blocked_calls"] = by_key[kid]["blocked_calls"]
-                k["last_used_at"] = by_key[kid]["last_used_at"]
-                changed = True
-            else:
-                k.setdefault("calls", 0)
-                k.setdefault("safe_calls", 0)
-                k.setdefault("blocked_calls", 0)
-                k.setdefault("last_used_at", "-")
-        if changed:
-            self._save_gateway_config(self.gateway_config)
+            changed = False
+            for k in self.gateway_config.get("api_keys", []):
+                kid = k["id"]
+                if kid in by_key:
+                    k["calls"] = by_key[kid]["calls"]
+                    k["safe_calls"] = by_key[kid]["safe_calls"]
+                    k["blocked_calls"] = by_key[kid]["blocked_calls"]
+                    k["last_used_at"] = by_key[kid]["last_used_at"]
+                    changed = True
+                else:
+                    if (
+                        k.get("calls", 0) != 0
+                        or k.get("safe_calls", 0) != 0
+                        or k.get("blocked_calls", 0) != 0
+                        or k.get("last_used_at", "-") != "-"
+                    ):
+                        changed = True
+                    k["calls"] = 0
+                    k["safe_calls"] = 0
+                    k["blocked_calls"] = 0
+                    k["last_used_at"] = "-"
+            if changed:
+                self._save_gateway_config(self.gateway_config)
 
     # ---------------- API Key Resolution & Management ----------------
     def resolve_api_key(self, token_or_id: Optional[str], *, secret_only: bool = False) -> Dict[str, Any]:
@@ -843,23 +860,24 @@ class PlatformStore:
             "promoted_case_id": None,
         }
 
-        self.audit_logs.insert(0, entry)
-        if persist:
-            self._save_audit_logs()
+        with self._audit_lock:
+            self.audit_logs.insert(0, entry)
+            if persist:
+                self._save_audit_logs()
 
-        # Update API key live counters
-        kid = entry["api_key_id"]
-        for k in self.gateway_config.get("api_keys", []):
-            if k["id"] == kid:
-                k["calls"] = int(k.get("calls", 0)) + 1
-                if is_safe:
-                    k["safe_calls"] = int(k.get("safe_calls", 0)) + 1
-                else:
-                    k["blocked_calls"] = int(k.get("blocked_calls", 0)) + 1
-                k["last_used_at"] = now_str
-                if persist:
-                    self._save_gateway_config(self.gateway_config)
-                break
+            # Update API key live counters
+            kid = entry["api_key_id"]
+            for k in self.gateway_config.get("api_keys", []):
+                if k["id"] == kid:
+                    k["calls"] = int(k.get("calls", 0)) + 1
+                    if is_safe:
+                        k["safe_calls"] = int(k.get("safe_calls", 0)) + 1
+                    else:
+                        k["blocked_calls"] = int(k.get("blocked_calls", 0)) + 1
+                    k["last_used_at"] = now_str
+                    if persist:
+                        self._save_gateway_config(self.gateway_config)
+                    break
 
         return entry
 
@@ -874,9 +892,10 @@ class PlatformStore:
         review_status: Optional[str] = None,
         q: Optional[str] = None,
         offset: int = 0,
-        limit: int = 50,
+        limit: Optional[int] = 50,
     ) -> Dict[str, Any]:
-        filtered = self.audit_logs
+        with self._audit_lock:
+            filtered = list(self.audit_logs)
         if api_key_id:
             filtered = [e for e in filtered if e.get("api_key_id") == api_key_id]
         if action:
@@ -910,11 +929,12 @@ class PlatformStore:
             ]
 
         total_matched = len(filtered)
+        sliced = filtered[offset:] if limit is None else filtered[offset : offset + limit]
         return {
             "total_matched": total_matched,
             "offset": offset,
-            "limit": limit,
-            "logs": filtered[offset : offset + limit],
+            "limit": total_matched if limit is None else limit,
+            "logs": sliced,
         }
 
     def get_audit_entry(self, audit_id: str) -> Optional[Dict[str, Any]]:
@@ -931,24 +951,25 @@ class PlatformStore:
         sync_keyword: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """Update human review status on an audit entry and optionally sync allow/block keywords."""
-        for e in self.audit_logs:
-            if e.get("audit_id") == audit_id:
-                e["review_status"] = review_status
-                e["reviewer_note"] = reviewer_note.strip()
-                if sync_keyword and sync_keyword.strip():
-                    kw = sync_keyword.strip()
-                    if review_status == "false_positive":
-                        allow_list = list(config_manager.config.custom_allow_keywords)
-                        if kw not in allow_list:
-                            allow_list.append(kw)
-                            config_manager.update({"custom_allow_keywords": allow_list})
-                    elif review_status in ("confirmed_risk", "false_negative"):
-                        block_list = list(config_manager.config.custom_block_keywords)
-                        if kw not in block_list:
-                            block_list.append(kw)
-                            config_manager.update({"custom_block_keywords": block_list})
-                self._save_audit_logs()
-                return e
+        with self._audit_lock:
+            for e in self.audit_logs:
+                if e.get("audit_id") == audit_id:
+                    e["review_status"] = review_status
+                    e["reviewer_note"] = reviewer_note.strip()
+                    if sync_keyword and sync_keyword.strip():
+                        kw = sync_keyword.strip()
+                        if review_status == "false_positive":
+                            allow_list = list(config_manager.config.custom_allow_keywords)
+                            if kw not in allow_list:
+                                allow_list.append(kw)
+                                config_manager.update({"custom_allow_keywords": allow_list})
+                        elif review_status in ("confirmed_risk", "false_negative"):
+                            block_list = list(config_manager.config.custom_block_keywords)
+                            if kw not in block_list:
+                                block_list.append(kw)
+                                config_manager.update({"custom_block_keywords": block_list})
+                    self._save_audit_logs()
+                    return e
         return None
 
     def promote_audit_to_qbank(self, audit_id: str, dataset: str = "curated") -> Optional[Dict[str, Any]]:
@@ -992,16 +1013,17 @@ class PlatformStore:
         return new_case
 
     def clear_audit_logs(self, api_key_id: Optional[str] = None) -> int:
-        if api_key_id:
-            before = len(self.audit_logs)
-            self.audit_logs = [e for e in self.audit_logs if e.get("api_key_id") != api_key_id]
-            removed = before - len(self.audit_logs)
-        else:
-            removed = len(self.audit_logs)
-            self.audit_logs = []
-        self._save_audit_logs()
-        self._sync_key_counters_from_logs()
-        return removed
+        with self._audit_lock:
+            if api_key_id:
+                before = len(self.audit_logs)
+                self.audit_logs = [e for e in self.audit_logs if e.get("api_key_id") != api_key_id]
+                removed = before - len(self.audit_logs)
+            else:
+                removed = len(self.audit_logs)
+                self.audit_logs = []
+            self._save_audit_logs()
+            self._sync_key_counters_from_logs()
+            return removed
 
     @staticmethod
     def _sanitize_csv_cell(val: Any) -> Any:

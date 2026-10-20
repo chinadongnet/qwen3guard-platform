@@ -30,10 +30,10 @@
       "qps_limit": 150,
       "enabled": true,
       "created_at": "2026-10-19 07:53:21",
-      "calls": 2,
-      "safe_calls": 1,
-      "blocked_calls": 1,
-      "last_used_at": "2026-10-19 07:53:27"
+      "calls": 7,
+      "safe_calls": 2,
+      "blocked_calls": 5,
+      "last_used_at": "2026-10-20 01:33:39"
     },
     {
       "id": "key_prod_cs",

@@ -190,12 +190,16 @@ def _select_llm_audit_result(gen: Dict[str, Any]) -> Dict[str, Any]:
     if stage == "stream_guard":
         base = dict(gen.get("output_guard") or gen.get("input_guard") or {})
         sg = gen.get("stream_guard") or {}
+        sg_tc260 = sg.get("tc260")
         base.update(
             {
                 "is_safe": False,
                 "action": "cutoff",
                 "risk_level": sg.get("overall_risk_level", "Unsafe"),
-                "risk_score": max(float(base.get("risk_score", 0.0)), 0.92),
+                "risk_score": max(float(base.get("risk_score", 0.0)), float(sg.get("risk_score", 0.92)), 0.92),
+                "tc260": sg_tc260 if sg_tc260 else base.get("tc260"),
+                "detected_categories": sg.get("detected_categories") or base.get("detected_categories", []),
+                "safe_prefix_text": sg.get("safe_prefix_text", ""),
                 "circuit_breaker_triggered": True,
                 "cutoff_token_index": sg.get("cutoff_token_index"),
                 "cutoff_reason": sg.get("cutoff_reason"),
@@ -688,7 +692,7 @@ async def guard_batch_detect(req: BatchGuardRequest, request: Request):
 
 
 def _mask_pii_patterns(text_val: str) -> str:
-    """Redact sensitive CN ID cards, mobile phones, and secret API keys."""
+    """Redact sensitive CN ID cards, mobile phones, bank card numbers, and secret API keys."""
     import re as _re
 
     masked = _re.sub(
@@ -697,6 +701,7 @@ def _mask_pii_patterns(text_val: str) -> str:
         text_val,
     )
     masked = _re.sub(r"\b(1[3-9]\d)\d{4}(\d{4})\b", r"\1****\2", masked)
+    masked = _re.sub(r"\b(62\d{2}|4\d{3}|5[1-5]\d{2})\d{8,11}(\d{4})\b", r"\1********\2", masked)
     masked = _re.sub(r"\b(sk-[a-zA-Z0-9]{4})[a-zA-Z0-9]{12,}([a-zA-Z0-9]{4})\b", r"\1****\2", masked)
     masked = _re.sub(r"\b(AKIA[0-9A-Z]{4})[0-9A-Z]{8}([0-9A-Z]{4})\b", r"\1********\2", masked)
     return masked
@@ -798,7 +803,6 @@ async def get_platform_api_catalog():
             "supported_headers": [
                 {"header": "Authorization", "format": "Bearer <qg-live-api-key>", "recommended": True},
                 {"header": "X-API-Key", "format": "<qg-live-api-key>", "recommended": True},
-                {"header": "X-API-Key-Id", "format": "<key-id>", "recommended": False},
             ],
             "body_parameter": "api_key",
         },
@@ -1301,8 +1305,9 @@ async def run_config_ab_test(payload: Dict[str, Any]):
 
 # -------------------- Dedicated Full-Trace Audit System Endpoints --------------------
 @app.get("/api/audit/summary")
-async def get_audit_summary():
+async def get_audit_summary(request: Request):
     """Return real-time aggregation across all API keys, TC260 categories, and attack methods."""
+    resolve_request_key(request)
     return platform_store.get_audit_report_correlation()
 
 

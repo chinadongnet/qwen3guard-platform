@@ -512,6 +512,8 @@ class SecurityShield:
             entities.append("公民身份证号(CN_ID_CARD)")
         if re.search(r"(?:手机号|电话|联系方式|查档|开盒|定位)[^\n]{0,20}\b1[3-9]\d{9}\b", text):
             entities.append("个人手机号码(CN_MOBILE)")
+        if re.search(r"\b(?:62\d{14,17}|4\d{15}|5[1-5]\d{14})\b", text):
+            entities.append("银行卡号(BANK_CARD)")
         if re.search(r"\b(?:sk-[a-zA-Z0-9]{20,}|AKIA[0-9A-Z]{16})\b", text):
             entities.append("高危API密钥(API_SECRET_KEY)")
         return entities

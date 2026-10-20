@@ -660,6 +660,10 @@ class ModelManager:
             "stream_guard": {
                 "is_safe": stream_guard["is_safe"],
                 "overall_risk_level": stream_guard["overall_risk_level"],
+                "risk_score": stream_guard.get("risk_score", 0.92 if stream_guard["circuit_breaker_triggered"] else 0.05),
+                "tc260": stream_guard.get("tc260"),
+                "detected_categories": stream_guard.get("detected_categories", []),
+                "safe_prefix_text": stream_guard.get("safe_prefix_text", ""),
                 "circuit_breaker_triggered": stream_guard["circuit_breaker_triggered"],
                 "cutoff_token_index": stream_guard["cutoff_token_index"],
                 "cutoff_reason": stream_guard["cutoff_reason"],

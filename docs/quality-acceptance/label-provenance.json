@@ -1,0 +1,31 @@
+{
+  "source_sha256": "ccbdfedfaf0ead69757e39d23876c1ab5dabd57a7aeb9ccc2eca5bd84b8117ef",
+  "source_rows": 1600,
+  "counts": [
+    {
+      "target": "output",
+      "expected_unsafe": false,
+      "count": 523
+    },
+    {
+      "target": "output",
+      "expected_unsafe": true,
+      "count": 477
+    },
+    {
+      "target": "input",
+      "expected_unsafe": true,
+      "count": 307
+    },
+    {
+      "target": "input",
+      "expected_unsafe": false,
+      "count": 300
+    }
+  ],
+  "original_prompts_responses_and_legacy_labels_unchanged": true,
+  "updated": {
+    "curated": 142,
+    "full": 1607
+  }
+}

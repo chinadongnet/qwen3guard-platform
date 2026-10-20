@@ -1,0 +1,81 @@
+{
+  "started_at": "2026-10-20T12:11:20.342366+00:00",
+  "project_id": "c5f3914d4fd843b0b73b2c3e27b09cc3",
+  "application_id": "69f0244af56042ca86efea2eb86aafca",
+  "policy_version": {
+    "id": "87dfed31d083434ca4e9803a3e1a9edd",
+    "created_at": 1792489044.412342,
+    "policy_id": "6797428c99224b4cbf9c1e468a992e77",
+    "version": 3,
+    "config": {
+      "risk_threshold": 0.5,
+      "controversial_as_unsafe": true,
+      "enable_deobfuscation": true,
+      "enable_jailbreak_shield": true,
+      "enable_tc260_semantic_shield": true,
+      "pii_action": "block",
+      "custom_block_keywords": [
+        "验收拦截标记"
+      ],
+      "timeout_seconds": 30,
+      "stream_window_chars": 16,
+      "failure_action": "block"
+    },
+    "author_id": "21253d261d99462593e1b274c3c61dc9"
+  },
+  "code_sha256": {
+    "app/enterprise/__init__.py": "92cb88ded18ecde83656309265a78c7cf3b356e11058f8134ab4df8dbd62ea21",
+    "app/enterprise/admin.py": "4eb6e397b42b94a38593c6b0b2603ca42e9fce3a613d6159f87ca1ca3bc0f3af",
+    "app/enterprise/application.py": "9e28b87396e3c644809c9847c5ebc21de4796a213c96a2b0833b7ea01d93152b",
+    "app/enterprise/data_api.py": "2ec98d3567de8e626eb91f1753e8d9fbfb772c61e55772ba81139ebfd0b0a805",
+    "app/enterprise/db.py": "b7e294c04c825c8081ee8502c575d5f20af4ec4cd484e39b51ca0825b2195a67",
+    "app/enterprise/inference.py": "88721dc2f68f6c70a4aa522bbe9a522db941d6888a4f3e47c5c6437c453fee55",
+    "app/enterprise/network.py": "a5dc762985149e4473b5d3b1184b6cab36602f591959d038179d824d5fb9573a",
+    "app/enterprise/presets.py": "5a4254529622739eddaf0cb0da023152cab95a3d8d9c946a3ced50d09eb21a67",
+    "app/enterprise/quality.py": "868c2f73273898b4179705f59b5d99876c0d5733b21a1985d906102596a68a40",
+    "app/enterprise/schemas.py": "04c672b01ba0492f02bb01907212650b30dd7697a2b7e1081b63b482e7d9ba6d",
+    "app/enterprise/security.py": "b17387725be838d230d136001854891774b94eb8ad4e8926714de428e94f9a39",
+    "app/enterprise/service.py": "3bea1413989dae2fb3e55cd0b5d1d6953d500332130422d61351e7e2a30eb049",
+    "app/enterprise/settings.py": "89431947be70cee1522715304dd8e5ddb1dd2e2abfc91eda936ea7d5569ecafa",
+    "app/enterprise/tasks.py": "b56c84d3b7e48dff6de99d04eaa090bc07731fc207c7007537ddf7a1b477c48f",
+    "app/enterprise/workbench.py": "2dc4f0134d7bef1cfc40c69c8d15e6a9638cca04614193cd7f762f8ca32a9151",
+    "app/model_manager.py": "b023627c27eb151a46bcec9c0789a869b699022b1b4e4708d8128f67f2e2bfee",
+    "app/security_shield.py": "56f8b2823513bb919a4d7666a0854074275988b6b0c3565bd8a137bf0d3eb6a5",
+    "app/config.py": "8bbe3eba704147694fb0bfe6722defefb89bc140453eef8f9f7e79726d9c9517",
+    "app/guard_output.py": "a43547727a9475290a412be2751e48ff62c2eb32f12f01f0dfc2f9f07010dee2"
+  },
+  "jobs": {
+    "curated": {
+      "id": "5efa9feaf1ce416982d40aa3ad35bae4",
+      "state": "queued",
+      "total": 142,
+      "snapshot_sha256": "efc1825df4f3d48fa98dda8c85646949d51797b1e0efc54e3133c2a218524384",
+      "unsafe": 62,
+      "benign": 80,
+      "unlabeled": 0,
+      "targets": {
+        "input": 35,
+        "output": 107
+      },
+      "duplicate_excess": 0,
+      "conflicting_labels": []
+    },
+    "full": {
+      "id": "2bfd5f7d1d8a49caaba9497a247d6c32",
+      "state": "queued",
+      "total": 1607,
+      "snapshot_sha256": "2865863bab77abcef603632cf8179baa4e083482233bc840a4e0162deeca8b1e",
+      "unsafe": 784,
+      "benign": 823,
+      "unlabeled": 0,
+      "targets": {
+        "output": 1000,
+        "input": 607
+      },
+      "duplicate_excess": 0,
+      "conflicting_labels": []
+    }
+  },
+  "target": "auto",
+  "scope": "Source-labeled regression acceptance; not independent certification"
+}

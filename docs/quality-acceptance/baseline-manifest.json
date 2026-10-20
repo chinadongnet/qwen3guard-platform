@@ -1,0 +1,60 @@
+{
+  "started_at": "2026-10-20T11:50:34.010031+00:00",
+  "project_id": "c5f3914d4fd843b0b73b2c3e27b09cc3",
+  "application_id": "69f0244af56042ca86efea2eb86aafca",
+  "policy_version": {
+    "id": "87dfed31d083434ca4e9803a3e1a9edd",
+    "created_at": 1792489044.412342,
+    "policy_id": "6797428c99224b4cbf9c1e468a992e77",
+    "version": 3,
+    "config": {
+      "risk_threshold": 0.5,
+      "controversial_as_unsafe": true,
+      "enable_deobfuscation": true,
+      "enable_jailbreak_shield": true,
+      "enable_tc260_semantic_shield": true,
+      "pii_action": "block",
+      "custom_block_keywords": [
+        "验收拦截标记"
+      ],
+      "timeout_seconds": 30,
+      "stream_window_chars": 16,
+      "failure_action": "block"
+    },
+    "author_id": "21253d261d99462593e1b274c3c61dc9"
+  },
+  "code_sha256": {
+    "app/enterprise/__init__.py": "92cb88ded18ecde83656309265a78c7cf3b356e11058f8134ab4df8dbd62ea21",
+    "app/enterprise/admin.py": "adfa5298f1800d56a02bdcdc548d98f0283e490947ca4ee0e55f39681fcc133a",
+    "app/enterprise/application.py": "9e28b87396e3c644809c9847c5ebc21de4796a213c96a2b0833b7ea01d93152b",
+    "app/enterprise/data_api.py": "2ec98d3567de8e626eb91f1753e8d9fbfb772c61e55772ba81139ebfd0b0a805",
+    "app/enterprise/db.py": "b7e294c04c825c8081ee8502c575d5f20af4ec4cd484e39b51ca0825b2195a67",
+    "app/enterprise/inference.py": "9ae7b6cdac581aedeb3ade441adbc6b59229d02fb14d354191186962a156b579",
+    "app/enterprise/network.py": "a5dc762985149e4473b5d3b1184b6cab36602f591959d038179d824d5fb9573a",
+    "app/enterprise/presets.py": "5a4254529622739eddaf0cb0da023152cab95a3d8d9c946a3ced50d09eb21a67",
+    "app/enterprise/schemas.py": "fad8d4d60c9e45c1582054346b94457215a617fef82c1e613a80a174f202fcdd",
+    "app/enterprise/security.py": "b17387725be838d230d136001854891774b94eb8ad4e8926714de428e94f9a39",
+    "app/enterprise/service.py": "e45fa96b130d625453f032768ed16fc3015258be7fc8d22b8c0ddd531f32c262",
+    "app/enterprise/settings.py": "89431947be70cee1522715304dd8e5ddb1dd2e2abfc91eda936ea7d5569ecafa",
+    "app/enterprise/tasks.py": "8ac48a6b5c9c774d1556ebb06a7681f9b9d194d1eb8f3bed5886c0e96ceb96b9",
+    "app/enterprise/workbench.py": "29976085a6a1d64265f61fd1b671f34e5991842d942f6a1ed22f4ef3b85b348d",
+    "app/model_manager.py": "4a320a62c3e72ffbf01f06735773fc2df0763b6ee9980f380c38ed6bcd2ed857",
+    "app/security_shield.py": "1ac9ae144bafb6dd5284a3ec42b486ee48d6f4ef635203d5a529a9ff39a16e21",
+    "app/config.py": "8bbe3eba704147694fb0bfe6722defefb89bc140453eef8f9f7e79726d9c9517"
+  },
+  "jobs": {
+    "curated": {
+      "id": "797f63c0fcca4864b8be45574a13e77a",
+      "state": "queued",
+      "total": 142,
+      "snapshot_sha256": "5e93a97db58fb643299ec2679989ac8b3d782deef8f466d417a00b28bc505a58",
+      "unsafe": 114,
+      "benign": 28,
+      "duplicate_excess": 0,
+      "conflicting_labels": []
+    }
+  },
+  "scope": "Original labeled corpora; regression acceptance, not independent certification",
+  "valid_for_quality": false,
+  "invalidation_reason": "Legacy suite-derived labels were applied to the wrong moderation target; superseded by source-validated acceptance."
+}

@@ -1,0 +1,84 @@
+{
+  "observed_at": "2026-10-20T08:35:04.737806+00:00",
+  "scope": "anonymous HTTP baseline; no capacity or accuracy certification",
+  "checks": [
+    {
+      "name": "model_health",
+      "outcome": "pass",
+      "evidence": {
+        "http_status": 200,
+        "models_loaded": true,
+        "elapsed_ms": 21.9
+      }
+    },
+    {
+      "name": "gateway_config_requires_auth",
+      "outcome": "fail",
+      "evidence": {
+        "http_status": 200
+      }
+    },
+    {
+      "name": "key_list_hides_secrets",
+      "outcome": "fail",
+      "evidence": {
+        "checked_without_credentials": true,
+        "plaintext_token_count": 4
+      }
+    },
+    {
+      "name": "data_plane_auth_config",
+      "outcome": "fail",
+      "evidence": {
+        "require_api_key": false
+      }
+    },
+    {
+      "name": "anonymous_access:/api/config",
+      "outcome": "fail",
+      "evidence": {
+        "http_status": 200
+      }
+    },
+    {
+      "name": "anonymous_access:/api/audit/logs?limit=1",
+      "outcome": "fail",
+      "evidence": {
+        "http_status": 200
+      }
+    },
+    {
+      "name": "openapi_contract_inventory",
+      "outcome": "info",
+      "evidence": {
+        "path_count": 42,
+        "security_scheme_count": 0,
+        "detect_accepts_history": false
+      }
+    },
+    {
+      "name": "benign_inference:/v1/guard/detect",
+      "outcome": "pass",
+      "evidence": {
+        "http_status": 200,
+        "elapsed_ms": 1749.06,
+        "allowed": true,
+        "audit_id": "aud-20261020-306516-27d0",
+        "risk_level": "Safe",
+        "note": "Transport smoke only; these two samples do not measure accuracy."
+      }
+    },
+    {
+      "name": "benign_inference:/v1/guard/input",
+      "outcome": "pass",
+      "evidence": {
+        "http_status": 200,
+        "elapsed_ms": 1657.94,
+        "allowed": true,
+        "audit_id": "aud-20261020-308173-5e83",
+        "risk_level": "safe",
+        "note": "Transport smoke only; these two samples do not measure accuracy."
+      }
+    }
+  ]
+}

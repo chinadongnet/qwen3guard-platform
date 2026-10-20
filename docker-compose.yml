@@ -1,6 +1,7 @@
 services:
   qwenguard-server:
-    image: vllm/vllm-openai:qwen38-x86_64-cu130
+    build: .
+    image: qwenguard-platform:3.0
     container_name: qwenguard-server
     restart: unless-stopped
     gpus: all
@@ -13,10 +14,42 @@ services:
       - QWENGUARD_MODEL_ROOT=/models
       - HOST_LAN_IPS=192.168.9.120,192.168.26.187,192.168.1.120,192.168.50.152,192.168.21.6
       - PYTHONUNBUFFERED=1
+      - DATABASE_URL=postgresql+psycopg://qwenguard:${POSTGRES_PASSWORD:?Run setup_platform.py first}@qwenguard-db:5432/qwenguard
+      - PLATFORM_SECRET=${PLATFORM_SECRET:?Run setup_platform.py first}
+      - BOOTSTRAP_ADMIN_USER=${BOOTSTRAP_ADMIN_USER:-admin}
+      - BOOTSTRAP_ADMIN_PASSWORD=${BOOTSTRAP_ADMIN_PASSWORD:?Run setup_platform.py first}
+      - COOKIE_SECURE=${COOKIE_SECURE:-false}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-}
+      - ALLOWED_PRIVATE_HOSTS=${ALLOWED_PRIVATE_HOSTS:-}
+      - AUDIT_RAW_RETENTION_DAYS=${AUDIT_RAW_RETENTION_DAYS:-7}
+    depends_on:
+      qwenguard-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8092/health/ready', timeout=5)"]
+      interval: 30s
+      timeout: 6s
+      start_period: 90s
+      retries: 3
     volumes:
       - ./:/workspace
       - qwenguard_models:/models
+  qwenguard-db:
+    image: postgres:16-alpine@sha256:16bc17c64a573ef34162af9298258d1aec548232985b33ed7b1eac33ba35c229
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: qwenguard
+      POSTGRES_USER: qwenguard
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run setup_platform.py first}
+    volumes:
+      - qwenguard_database:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qwenguard -d qwenguard"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
 volumes:
   qwenguard_models:
     external: true
+  qwenguard_database:

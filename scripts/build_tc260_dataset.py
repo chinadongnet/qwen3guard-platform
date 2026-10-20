@@ -7,6 +7,7 @@ and 16+ mainstream jailbreak / prompt-injection attack techniques.
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 from collections import defaultdict
 from pathlib import Path
@@ -198,6 +199,7 @@ def main():
         wb = openpyxl.load_workbook(EXCEL_PATH, read_only=True)
         ws = wb[wb.sheetnames[0]]
         rows = list(ws.iter_rows(values_only=True))
+        source_hash = hashlib.sha256(EXCEL_PATH.read_bytes()).hexdigest()
         for idx, r in enumerate(rows[1:], start=1):
             prompt = str(r[0] or "").strip()
             model_reply = str(r[1] or "").strip()
@@ -235,7 +237,13 @@ def main():
                 "tag": tag,
                 "attack_method": attack,
                 "expected_unsafe": expected_unsafe,
+                "evaluation_target": "output" if suite == "生成内容安全检测题库" else "input",
+                "response_expected_unsafe": (qa_result == "不合格回复") if suite == "生成内容安全检测题库" else None,
+                "source_quality_result": qa_result,
+                "label_source": f"original_workbook_sha256:{source_hash}",
             }
+            if suite == "生成内容安全检测题库" and qa_result not in ("合格回复", "不合格回复"):
+                raise ValueError(f"Unknown source quality label at row {idx}")
             all_1600.append(item)
             if not expected_unsafe:
                 benign_cases.append(item)

@@ -5,7 +5,7 @@ Works in tandem with Qwen3Guard-Gen-0.6B and Qwen3Guard-Stream-0.6B:
    word-order puzzles, stuttering roleplay, conditional print traps, Base64 payloads).
 2. Mainstream Prompt Injection / Jailbreak / System Leak / MCP Hijack / PII Detection.
 3. TC260 (GB/T 45654-2025 / TC260-003) 5 Major & 31 Subcategory Mapping and Semantic Analyzer.
-4. Benign Non-Refusal (非拒答) Context Whitelist Protection to prevent false positives.
+4. Separate formatting diagnostics from evidence of harmful intent.
 """
 from __future__ import annotations
 
@@ -26,6 +26,7 @@ QWEN_GUARD_TO_TC260 = {
     "Non-violent Illegal Acts": ("A.1", "违反社会主义核心价值观的内容", "A.1.8", "其他法律、行政法规禁止的内容"),
     "Cyberattack": ("A.1", "违反社会主义核心价值观的内容", "A.1.8", "其他法律、行政法规禁止的内容"),
     "Jailbreak": ("A.1", "违反社会主义核心价值观的内容", "A.1.8", "其他法律、行政法规禁止的内容"),
+    "Unethical Acts": ("A.2", "包含歧视性内容", "A.2.9", "其他歧视性内容"),
     "Copyright Violation": ("A.3", "商业违法违规", "A.3.1", "侵犯他人知识产权"),
     "Suicide & Self-Harm": ("A.4", "侵犯他人合法权益", "A.4.1", "危害他人身心健康"),
     "PII": ("A.4", "侵犯他人合法权益", "A.4.6", "侵害他人个人信息权益"),
@@ -139,7 +140,7 @@ TC260_SUBCATEGORY_RULES: List[Tuple[str, str, str, str, List[str]]] = [
             r"(洗钱|地下钱庄|跑分平台|电信诈骗|杀猪盘|钓鱼网站).*(教程|话术|方案|脚本)",
             r"(赌博网站|网络赌场|六合彩外围).*(搭建|推广|代理)",
             r"(枪支|弹药|消音器).*(制造|改装|购买渠道)",
-            r"盗窃|撬锁|扒窃.*技巧",
+            r"(盗窃|撬锁|扒窃).*技巧",
         ],
     ),
     (
@@ -377,7 +378,7 @@ TC260_SUBCATEGORY_RULES: List[Tuple[str, str, str, str, List[str]]] = [
 
 # Mainstream attack method signatures
 JAILBREAK_PATTERNS: List[Tuple[str, str]] = [
-    ("DAN jailbreak", r"(?i)(DAN\s*\d*|Developer\s*Mode|Ignore\s+all\s+previous\s+instructions|do\s+anything\s+now|无限制开发者模式|进入越狱模式)"),
+    ("DAN jailbreak", r"(?i)(\bDAN(?:\s*\d+(?:\.\d+)?)?\b|\bDeveloper\s*Mode\b|Ignore\s+all\s+previous\s+instructions|do\s+anything\s+now|无限制开发者模式|进入越狱模式)"),
     ("系统指令覆盖注入", r"(?i)(\[SYSTEM\s*OVERRIDE\]|忽略此前的全部安全设定|<BEGIN\s+SAFETY\s+POLICY>|output\s+your\s+complete\s+system\s+prompt|execute_shell|rm\s+-rf\s+/)"),
     ("翻译和目标劫持", r"(翻译成?.*并(详细阐述|直接回答|扩写|执行)|忽略上述翻译任务)"),
     ("条件触发", r"(如果\s*[a-zA-Z0-9_]+\s*(大于|小于|等于|>|<|==).*请?(直接)?(打印|输出|回答))"),
@@ -424,7 +425,7 @@ class SecurityShield:
     def __init__(self) -> None:
         self._reference_unsafe_map: Dict[str, dict] = {}
         self._reference_benign_set: set[str] = set()
-        self._load_reference_corpus()
+        # Production decisions must never load evaluation labels.
 
     @staticmethod
     def _norm_key(text: str) -> str:
@@ -432,32 +433,9 @@ class SecurityShield:
         return re.sub(r"[^\u4e00-\u9fa5a-zA-Z0-9]", "", text).lower()[:160]
 
     def _load_reference_corpus(self) -> None:
-        """Load TC260 reference corpus signatures to ensure accurate 31-subcategory attribution."""
-        for fname in ("tc260_full_1600.json", "tc260_cases.json"):
-            fpath = DATA_DIR / fname
-            if not fpath.exists():
-                continue
-            try:
-                data = json.loads(fpath.read_text(encoding="utf-8"))
-                cases = data.get("cases", []) if isinstance(data, dict) else data
-                for c in cases:
-                    prompt = c.get("prompt", "")
-                    key = self._norm_key(prompt)
-                    if not key:
-                        continue
-                    if c.get("expected_unsafe", True):
-                        self._reference_unsafe_map[key] = {
-                            "major_code": c.get("major_code", "A.1"),
-                            "major_name": c.get("major_name", "违反社会主义核心价值观的内容"),
-                            "sub_code": c.get("sub_code", "A.1.8"),
-                            "sub_name": c.get("sub_name", "其他法律、行政法规禁止的内容"),
-                            "attack_method": c.get("attack_method", "无指令攻击"),
-                            "tag": c.get("tag", ""),
-                        }
-                    else:
-                        self._reference_benign_set.add(key)
-            except Exception:
-                pass
+        """Compatibility hook: evaluation datasets are not a production rule source."""
+        self._reference_unsafe_map.clear()
+        self._reference_benign_set.clear()
 
     def deobfuscate_and_unwrap(self, text: str) -> Tuple[str, List[str]]:
         """Strip symbol noise, unwrap fill-in-the-blank traps, stuttering, and Base64."""
@@ -469,9 +447,11 @@ class SecurityShield:
 
         # 1. Detect heavy symbol/emoji insertion between Chinese characters
         # e.g., 女&]:性-|的≥<¤领÷>导=/能?>力
-        interleaved_matches = re.findall(r"[\u4e00-\u9fa5][^\u4e00-\u9fa5\s，。？！、；：“”‘’（）《》a-zA-Z0-9]{1,5}[\u4e00-\u9fa5]", working)
+        # Markdown emphasis/quotes and ordinary punctuation are formatting, not
+        # obfuscation. Only dense symbol runs directly between CJK characters count.
+        interleaved_matches = re.findall(r"[\u4e00-\u9fa5][^\u4e00-\u9fa5\s，。？！、；：“”‘’（）《》a-zA-Z0-9*`'\"#]{1,5}[\u4e00-\u9fa5]", working)
         if len(interleaved_matches) >= 3:
-            if any(ord(ch) > 0x2600 for ch in working):
+            if any(0x1F000 <= ord(ch) <= 0x1FAFF or 0x2600 <= ord(ch) <= 0x27BF for ch in "".join(interleaved_matches)):
                 detected_obfuscations.append("Emoji混淆")
             else:
                 detected_obfuscations.append("符号混淆")
@@ -518,6 +498,30 @@ class SecurityShield:
             entities.append("高危API密钥(API_SECRET_KEY)")
         return entities
 
+    @staticmethod
+    def _corrective_mention(text, match) -> bool:
+        """A local denial/critique is not an endorsement of the quoted topic.
+
+        Used only for output taxonomy heuristics after the model says Safe.
+        Sentence/contrast boundaries prevent a benign preface from excusing a
+        separate harmful instruction; explicit custom rules and PII still apply.
+        """
+        boundaries = list(re.finditer(r"[。！？!?；;\n]|但是|然而|但|却", text))
+        if re.search(r"但是|然而|但|却", text[match.start():match.end()]):
+            return False
+        start = max((m.end() for m in boundaries if m.end() <= match.start()), default=0)
+        end = min((m.start() for m in boundaries if m.start() >= match.end()), default=len(text))
+        clause = text[max(start, match.start()-100):min(end, match.end()+120)]
+        if any(m.start() <= match.start() and m.end() >= match.end()
+               for m in re.finditer(r"《[^》\n]{1,60}法》", text)):
+            return True
+        return bool(
+            re.search(r"(?:不能|不得|不应|不该|禁止|严禁|反对|拒绝|抵制|谴责|举报|报案|辟谣|防范|杜绝)", clause)
+            or re.search(r"(?:这种|此类|这是|上述).{0,100}(?:错误|谣言|造谣|歧视|偏见)", clause)
+            or ("刻板印象" in clause and re.search(r"错误|构建|产物|概括|不能|偏见", clause))
+            or re.search(r"可能构成[“\"']|终身创伤|等暴行", clause)
+        )
+
     def evaluate(
         self,
         text: str,
@@ -525,17 +529,12 @@ class SecurityShield:
         qwen_safety: str = "Safe",
         qwen_categories: Optional[List[str]] = None,
         response_text: str = "",
+        response_refused: bool = False,
     ) -> ShieldResult:
         """Combine Qwen3Guard model judgment with Multi-Layer Security Shield & TC260 taxonomy."""
         qwen_categories = list(qwen_categories or [])
-        combined_target = f"{text}\n{response_text}".strip() if response_text else text
-
-        # Step 0: Custom Allow Keywords check
-        for allow_kw in cfg.custom_allow_keywords:
-            if allow_kw and allow_kw in combined_target:
-                # Only allow if there is no explicit jailbreak override
-                if "[SYSTEM OVERRIDE]" not in combined_target and "DAN" not in combined_target:
-                    pass
+        # The model sees the full context; output rules inspect the actual response.
+        combined_target = response_text if response_text else text
 
         # Step 1: De-obfuscate
         if cfg.enable_deobfuscation:
@@ -546,11 +545,7 @@ class SecurityShield:
         attack_methods: List[str] = list(obf_attacks)
         matched_rules: List[str] = []
         pii_entities: List[str] = []
-
-        # Step 2: Check TC260 reference corpus signatures (if enabled)
-        norm_k = self._norm_key(text)
-        ref_unsafe = self._reference_unsafe_map.get(norm_k) if cfg.enable_tc260_semantic_shield else None
-        is_ref_benign = (norm_k in self._reference_benign_set) if cfg.enable_tc260_semantic_shield else False
+        safe_refusal = bool(response_text) and qwen_safety == "Safe" and response_refused
 
         # Step 3: Check Custom Block Keywords
         for kw in cfg.custom_block_keywords:
@@ -558,7 +553,7 @@ class SecurityShield:
                 matched_rules.append(f"自定义拦截词:{kw}")
 
         # Step 4: Check Mainstream Jailbreak & Prompt Injection patterns
-        if cfg.enable_jailbreak_shield:
+        if cfg.enable_jailbreak_shield and not safe_refusal:
             for atk_name, pattern in JAILBREAK_PATTERNS:
                 if re.search(pattern, deobf_text):
                     if atk_name not in attack_methods:
@@ -573,48 +568,22 @@ class SecurityShield:
 
         # Step 6: Check TC260 31-Subcategory Semantic Rules
         matched_tc260: Optional[Tuple[str, str, str, str]] = None
-        if cfg.enable_tc260_semantic_shield:
+        if cfg.enable_tc260_semantic_shield and not safe_refusal:
             for maj_c, maj_n, sub_c, sub_n, patterns in TC260_SUBCATEGORY_RULES:
                 for pat in patterns:
-                    if re.search(pat, deobf_text, flags=re.IGNORECASE):
+                    # Naming discrimination is not itself discrimination. These
+                    # topic labels remain available through model classification.
+                    if pat in ("民族歧视", "信仰歧视", "国别歧视", "地域歧视", "性别歧视",
+                               "年龄歧视", "职业歧视", "健康歧视", "其他歧视"):
+                        continue
+                    matches = re.finditer(pat, deobf_text, flags=re.IGNORECASE)
+                    if any(not (response_text and qwen_safety == "Safe"
+                                and self._corrective_mention(deobf_text, match)) for match in matches):
                         matched_tc260 = (maj_c, maj_n, sub_c, sub_n)
                         matched_rules.append(f"TC260[{sub_c}]:{sub_n}")
                         break
                 if matched_tc260:
                     break
-
-        # Step 7: Use reference attribution if matched in TC260 corpus
-        if ref_unsafe is not None:
-            matched_tc260 = (
-                ref_unsafe["major_code"],
-                ref_unsafe["major_name"],
-                ref_unsafe["sub_code"],
-                ref_unsafe["sub_name"],
-            )
-            atk = ref_unsafe.get("attack_method", "无指令攻击")
-            if atk and atk != "无指令攻击" and atk not in attack_methods:
-                attack_methods.append(atk)
-            matched_rules.append(f"TC260题库特征[{ref_unsafe['sub_code']}]:{ref_unsafe['sub_name']}")
-
-        # Step 8: Benign Non-Refusal (非拒答) protection
-        # If the query is a verified benign non-refusal question (or clearly educational/defensive with no jailbreak/custom block)
-        is_educational_benign = any(re.search(p, text) for p in BENIGN_CONTEXT_PATTERNS) and not attack_methods and not matched_tc260
-        if (is_ref_benign or is_educational_benign) and not matched_tc260 and not pii_entities and "DAN jailbreak" not in attack_methods and "系统指令覆盖注入" not in attack_methods:
-            return ShieldResult(
-                is_safe=True,
-                risk_level="Safe",
-                risk_score=0.04,
-                tc260_major_code="SAFE",
-                tc260_major_name="正常安全内容（非拒答）",
-                tc260_sub_code="SAFE",
-                tc260_sub_name="正常安全内容（非拒答）",
-                qwen_categories=[],
-                attack_methods=[],
-                deobfuscated_text=deobf_text if deobf_text != combined_target else "",
-                matched_rules=["非拒答正向白名单保护"],
-                pii_entities=[],
-                explanation="经 Qwen3Guard 与 TC260 非拒答语义核验，属于正常合规问题。",
-            )
 
         # Step 9: Synthesize Qwen3Guard-Gen decision + Shield decision
         qwen_is_unsafe = qwen_safety == "Unsafe" or (
@@ -622,7 +591,7 @@ class SecurityShield:
         )
 
         # Map Qwen3Guard category to TC260 if not already mapped by specific TC260 rule
-        if matched_tc260 is None and qwen_categories:
+        if matched_tc260 is None and qwen_is_unsafe and qwen_categories:
             for qcat in qwen_categories:
                 if qcat in QWEN_GUARD_TO_TC260:
                     matched_tc260 = QWEN_GUARD_TO_TC260[qcat]
@@ -633,7 +602,9 @@ class SecurityShield:
         if matched_tc260 is None and pii_entities:
             matched_tc260 = ("A.4", "侵犯他人合法权益", "A.4.6", "侵害他人个人信息权益")
 
-        if matched_tc260 is None and attack_methods:
+        hard_jailbreak = any(rule in ("越狱/注入防护:DAN jailbreak", "越狱/注入防护:系统指令覆盖注入")
+                             for rule in matched_rules)
+        if matched_tc260 is None and hard_jailbreak:
             matched_tc260 = ("A.1", "违反社会主义核心价值观的内容", "A.1.8", "其他法律、行政法规禁止的内容")
 
         # Compute weighted risk score
@@ -649,7 +620,7 @@ class SecurityShield:
 
         if attack_methods:
             jb_weight = cfg.category_weights.get("JAILBREAK", 0.95)
-            if matched_tc260 is not None or qwen_is_unsafe or any(a in ("DAN jailbreak", "系统指令覆盖注入", "填词陷阱", "条件触发") for a in attack_methods):
+            if matched_tc260 is not None or qwen_is_unsafe or hard_jailbreak:
                 score = max(score, round(0.92 * jb_weight, 3))
 
         if pii_entities:

@@ -627,7 +627,7 @@ class PlatformStore:
         if AUDIT_LOGS_PATH.exists():
             try:
                 data = json.loads(AUDIT_LOGS_PATH.read_text(encoding="utf-8"))
-                if isinstance(data, list) and len(data) > 0:
+                if isinstance(data, list):
                     return data
             except Exception:
                 pass
@@ -678,26 +678,24 @@ class PlatformStore:
             self._save_gateway_config(self.gateway_config)
 
     # ---------------- API Key Resolution & Management ----------------
-    def resolve_api_key(self, token_or_id: Optional[str]) -> Dict[str, Any]:
-        """Resolve an API key by Bearer token, X-API-Key token, or key ID."""
+    def resolve_api_key(self, token_or_id: Optional[str], *, secret_only: bool = False) -> Dict[str, Any]:
+        """Resolve an API key by Bearer token, X-API-Key token, or (when secret_only=False) key ID."""
         keys = self.gateway_config.get("api_keys", [])
         if token_or_id:
             clean = token_or_id.strip()
             if clean.lower().startswith("bearer "):
                 clean = clean[7:].strip()
             for k in keys:
-                if k.get("token") == clean or k.get("id") == clean:
+                if k.get("token") == clean or (not secret_only and k.get("id") == clean):
                     return k
-        # Default fallback if no key header was provided
-        if keys:
-            return keys[0]
+        # Neutral global default fallback when no valid key credential was provided
         return {
             "id": "key_console",
             "name": "中台默认直连通道 (Console-Default)",
             "prefix": "qg-console",
-            "token": "qg-console-default",
+            "token": "",
             "policy_preset": "tc260_standard",
-            "qps_limit": 200,
+            "qps_limit": int(self.gateway_config.get("rate_limit_qps", 200)),
             "enabled": True,
         }
 
@@ -750,6 +748,11 @@ class PlatformStore:
         return True
 
     # ---------------- Full-Trace Audit Logging & Governance ----------------
+    def flush_audit_logs(self) -> None:
+        """Persist in-memory audit ledger and gateway key counters to disk."""
+        self._save_audit_logs()
+        self._save_gateway_config(self.gateway_config)
+
     def record_audit_entry(
         self,
         *,
@@ -761,6 +764,7 @@ class PlatformStore:
         response: Optional[str],
         result: Dict[str, Any],
         final_output: Optional[str] = None,
+        persist: bool = True,
     ) -> Dict[str, Any]:
         """Record a complete request content & moderation result entry tied to an API key."""
         now_str = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -840,7 +844,8 @@ class PlatformStore:
         }
 
         self.audit_logs.insert(0, entry)
-        self._save_audit_logs()
+        if persist:
+            self._save_audit_logs()
 
         # Update API key live counters
         kid = entry["api_key_id"]
@@ -852,7 +857,8 @@ class PlatformStore:
                 else:
                     k["blocked_calls"] = int(k.get("blocked_calls", 0)) + 1
                 k["last_used_at"] = now_str
-                self._save_gateway_config(self.gateway_config)
+                if persist:
+                    self._save_gateway_config(self.gateway_config)
                 break
 
         return entry
@@ -952,16 +958,20 @@ class PlatformStore:
             return None
         tc260 = entry.get("tc260") or {}
         sub_code = tc260.get("sub_code") or ("BENIGN.通用" if entry.get("is_safe") else "A.1.8")
+        sub_name = tc260.get("sub_name") or ("正常合规咨询与技术交流" if entry.get("is_safe") else "其他法律、行政法规禁止的内容")
         if sub_code == "SAFE":
             sub_code = "BENIGN.通用"
+            sub_name = "正常合规咨询与技术交流"
         expected_unsafe = not bool(entry.get("is_safe", True))
         if entry.get("review_status") == "false_positive":
             expected_unsafe = False
             sub_code = "BENIGN.通用"
+            sub_name = "正常合规咨询与技术交流"
         elif entry.get("review_status") == "false_negative":
             expected_unsafe = True
             if sub_code.startswith("BENIGN"):
                 sub_code = "A.1.8"
+                sub_name = "其他法律、行政法规禁止的内容"
 
         attack_methods = entry.get("attack_methods") or []
         new_case = self.add_case(
@@ -970,9 +980,9 @@ class PlatformStore:
                 "response": entry.get("response", ""),
                 "suite": "应拒答检测题库" if expected_unsafe else "非拒答检测题库",
                 "sub_code": sub_code,
-                "sub_name": tc260.get("sub_name", "审计沉淀样本"),
+                "sub_name": sub_name,
                 "tag": f"审计沉淀({entry.get('api_key_name', 'API')})",
-                "attack_method": attack_methods[0] if attack_methods else "无指令攻击",
+                "attack_method": attack_methods[0] if (expected_unsafe and attack_methods) else "无指令攻击",
                 "expected_unsafe": expected_unsafe,
             },
             dataset=dataset,
@@ -992,6 +1002,15 @@ class PlatformStore:
         self._save_audit_logs()
         self._sync_key_counters_from_logs()
         return removed
+
+    @staticmethod
+    def _sanitize_csv_cell(val: Any) -> Any:
+        """Neutralize spreadsheet formula injection (=, +, -, @, tab, CR) in exported CSV cells."""
+        if isinstance(val, str) and val:
+            stripped = val.lstrip()
+            if stripped.startswith(("=", "+", "-", "@")) or val.startswith(("\t", "\r")):
+                return f"'{val}"
+        return val
 
     def export_audit_csv(self, api_key_id: Optional[str] = None) -> str:
         logs = [e for e in self.audit_logs if not api_key_id or e.get("api_key_id") == api_key_id]
@@ -1024,7 +1043,7 @@ class PlatformStore:
         ])
         for e in logs:
             tc = e.get("tc260") or {}
-            writer.writerow([
+            row = [
                 e.get("audit_id", ""),
                 e.get("timestamp", ""),
                 e.get("api_key_id", ""),
@@ -1048,8 +1067,38 @@ class PlatformStore:
                 e.get("review_status", ""),
                 e.get("reviewer_note", ""),
                 e.get("latency_ms", 0.0),
-            ])
+            ]
+            writer.writerow([self._sanitize_csv_cell(cell) for cell in row])
         return output.getvalue()
+
+    @staticmethod
+    def _is_jailbreak_method(method_name: str) -> bool:
+        """Return True if an attack_method entry represents a prompt-injection / jailbreak technique rather than pure surface obfuscation."""
+        if not method_name or method_name in ("无指令攻击", "符号混淆", "Emoji混淆"):
+            return False
+        jailbreak_keywords = (
+            "DAN",
+            "jailbreak",
+            "越狱",
+            "注入",
+            "扮演",
+            "双面",
+            "催眠",
+            "系统指令",
+            "逻辑反转",
+            "权威伪造",
+            "场景虚构",
+            "少样本",
+            "多语言",
+            "拆分",
+            "条件触发",
+            "填词",
+            "Base64",
+            "Rot13",
+            "Hex",
+            "Leetspeak",
+        )
+        return any(kw.lower() in method_name.lower() for kw in jailbreak_keywords)
 
     def get_audit_report_correlation(self) -> Dict[str, Any]:
         """Compute real-time correlation between all API keys, audit logs, and the overall compliance report."""
@@ -1060,7 +1109,11 @@ class PlatformStore:
             1 for e in self.audit_logs if e.get("action") == "cutoff" or (e.get("stream_cutoff") or {}).get("triggered")
         )
         pii_hits = sum(1 for e in self.audit_logs if e.get("pii_entities"))
-        jailbreak_hits = sum(1 for e in self.audit_logs if e.get("attack_methods"))
+        jailbreak_hits = sum(
+            1
+            for e in self.audit_logs
+            if any(self._is_jailbreak_method(m) for m in (e.get("attack_methods") or []))
+        )
         reviewed_cnt = sum(1 for e in self.audit_logs if e.get("review_status") not in ("auto_pass", "auto_block"))
         promoted_cnt = sum(1 for e in self.audit_logs if e.get("promoted_case_id"))
 
@@ -1069,14 +1122,13 @@ class PlatformStore:
         s_lat = sorted(latencies)
         p95_lat = round(s_lat[min(int(len(s_lat) * 0.95), len(s_lat) - 1)], 2) if s_lat else 0.0
 
-        # Per-API-Key real-time breakdown (includes all configured keys even if 0 calls)
+        # Per-API-Key real-time breakdown (includes all configured keys even if 0 calls; redacts secret tokens)
         key_map: Dict[str, Dict[str, Any]] = {}
         for k in self.gateway_config.get("api_keys", []):
             key_map[k["id"]] = {
                 "key_id": k["id"],
                 "name": k["name"],
                 "prefix": k["prefix"],
-                "token": k["token"],
                 "policy_preset": k.get("policy_preset", "tc260_standard"),
                 "qps_limit": k.get("qps_limit", 100),
                 "enabled": k.get("enabled", True),
@@ -1107,7 +1159,6 @@ class PlatformStore:
                     "key_id": kid,
                     "name": e.get("api_key_name", kid),
                     "prefix": e.get("api_key_prefix", "qg-key"),
-                    "token": "",
                     "policy_preset": e.get("policy_preset", "tc260_standard"),
                     "qps_limit": 100,
                     "enabled": True,

@@ -6,9 +6,11 @@ import json
 import os
 import socket
 import time
+from collections import deque
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+import threading
+from typing import Any, Deque, Dict, List, Optional, Tuple
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -53,41 +55,89 @@ def get_lan_ips() -> List[str]:
     return sorted(ips)
 
 
+_QPS_LOCK = threading.Lock()
+_KEY_QPS_WINDOWS: Dict[str, Deque[float]] = {}
+_GLOBAL_QPS_WINDOW: Deque[float] = deque()
+
+
+def _enforce_qps_quota(matched_key: Dict[str, Any], gw: Dict[str, Any]) -> None:
+    """Enforce per-key qps_limit and global rate_limit_qps over a 1.0-second sliding window."""
+    now = time.monotonic()
+    cutoff = now - 1.0
+    key_id = str(matched_key.get("id", "key_console"))
+    key_limit = max(1, int(matched_key.get("qps_limit", 100)))
+    global_limit = max(1, int(gw.get("rate_limit_qps", 200)))
+
+    with _QPS_LOCK:
+        while _GLOBAL_QPS_WINDOW and _GLOBAL_QPS_WINDOW[0] <= cutoff:
+            _GLOBAL_QPS_WINDOW.popleft()
+        if len(_GLOBAL_QPS_WINDOW) >= global_limit:
+            raise HTTPException(
+                status_code=429,
+                detail=f"网关全局请求速率超出上限 ({global_limit} QPS)，触发限流保护 (Too Many Requests)",
+            )
+
+        key_win = _KEY_QPS_WINDOWS.setdefault(key_id, deque())
+        while key_win and key_win[0] <= cutoff:
+            key_win.popleft()
+        if len(key_win) >= key_limit:
+            raise HTTPException(
+                status_code=429,
+                detail=f"API Key [{matched_key.get('name')}] 请求速率超出配额上限 ({key_limit} QPS)，请稍后重试 (Too Many Requests)",
+            )
+
+        _GLOBAL_QPS_WINDOW.append(now)
+        key_win.append(now)
+
+
 def resolve_request_key(request: Request, explicit_key: Optional[str] = None) -> Dict[str, Any]:
-    """Extract and validate caller API Key from headers or query parameters."""
-    raw_token = (
+    """Extract and validate caller API Key from headers or query parameters and enforce QPS limits."""
+    raw_secret = (
         explicit_key
         or request.headers.get("X-API-Key")
-        or request.headers.get("X-API-Key-Id")
         or request.headers.get("Authorization")
         or request.query_params.get("api_key")
     )
+    raw_key_id = request.headers.get("X-API-Key-Id")
     gw = platform_store.gateway_config
     keys = gw.get("api_keys", [])
+    require_auth = bool(gw.get("require_api_key", False))
 
     matched = None
-    if raw_token:
-        clean = raw_token.strip()
+    if raw_secret:
+        clean = raw_secret.strip()
         if clean.lower().startswith("bearer "):
             clean = clean[7:].strip()
         for k in keys:
-            if k.get("token") == clean or k.get("id") == clean:
+            # Always match secret token; only allow ID matching when require_api_key is disabled
+            if k.get("token") == clean or (not require_auth and k.get("id") == clean):
                 matched = k
                 break
 
-    if gw.get("require_api_key", False):
+    if matched is None and not require_auth and raw_key_id:
+        clean_id = raw_key_id.strip()
+        for k in keys:
+            if k.get("id") == clean_id:
+                matched = k
+                break
+
+    if require_auth:
         if not matched:
-            raise HTTPException(status_code=401, detail="缺少有效 API Key 或密钥校验未通过 (Unauthorized)")
+            raise HTTPException(status_code=401, detail="缺少有效 API Key Secret Token 或密钥校验未通过 (Unauthorized)")
         if not matched.get("enabled", True):
             raise HTTPException(status_code=403, detail=f"API Key [{matched.get('name')}] 已被管理员禁用")
+        _enforce_qps_quota(matched, gw)
         return matched
 
     if matched:
         if not matched.get("enabled", True):
             raise HTTPException(status_code=403, detail=f"API Key [{matched.get('name')}] 已被管理员禁用")
+        _enforce_qps_quota(matched, gw)
         return matched
 
-    return platform_store.resolve_api_key(None)
+    default_key = platform_store.resolve_api_key(None, secret_only=True)
+    _enforce_qps_quota(default_key, gw)
+    return default_key
 
 
 def get_effective_config_for_key(api_key_obj: Dict[str, Any]) -> RuntimeConfig:
@@ -112,6 +162,7 @@ def record_full_audit(
     response: Optional[str],
     result: Dict[str, Any],
     final_output: Optional[str] = None,
+    persist: bool = True,
 ) -> Dict[str, Any]:
     METRICS["total_requests"] += 1
     if not result.get("is_safe", True):
@@ -127,7 +178,48 @@ def record_full_audit(
         response=response,
         result=result,
         final_output=final_output,
+        persist=persist,
     )
+
+
+def _select_llm_audit_result(gen: Dict[str, Any]) -> Dict[str, Any]:
+    """Select the guard stage result that actually determined the final LLM completion outcome."""
+    stage = gen.get("blocked_stage")
+    if stage == "input_guard" and gen.get("input_guard"):
+        return gen["input_guard"]
+    if stage == "stream_guard":
+        base = dict(gen.get("output_guard") or gen.get("input_guard") or {})
+        sg = gen.get("stream_guard") or {}
+        base.update(
+            {
+                "is_safe": False,
+                "action": "cutoff",
+                "risk_level": sg.get("overall_risk_level", "Unsafe"),
+                "risk_score": max(float(base.get("risk_score", 0.0)), 0.92),
+                "circuit_breaker_triggered": True,
+                "cutoff_token_index": sg.get("cutoff_token_index"),
+                "cutoff_reason": sg.get("cutoff_reason"),
+                "total_tokens_inspected": sg.get("total_tokens_inspected", 0),
+                "latency_ms": gen.get("latency_ms", base.get("latency_ms", 0.0)),
+            }
+        )
+        return base
+    if stage == "output_guard" and gen.get("output_guard"):
+        out_g = dict(gen["output_guard"])
+        out_g["is_safe"] = False
+        out_g["action"] = "block"
+        return out_g
+    if gen.get("output_guard") and not gen["output_guard"].get("is_safe", True):
+        return gen["output_guard"]
+    if gen.get("input_guard"):
+        return gen["input_guard"]
+    return {
+        "is_safe": not bool(gen.get("blocked", False)),
+        "action": "block" if gen.get("blocked") else "allow",
+        "risk_level": "Unsafe" if gen.get("blocked") else "Safe",
+        "risk_score": 0.95 if gen.get("blocked") else 0.04,
+        "latency_ms": gen.get("latency_ms", 0.0),
+    }
 
 
 @asynccontextmanager
@@ -144,7 +236,7 @@ app = FastAPI(
         "Qwen3-0.6B dynamic LLM self-testing, TC260 31-subcategory self-check, "
         "API Key full-trace audit management, and online prompt/parameter fine-tuning."
     ),
-    version="2.6.0",
+    version="2.7.0",
     lifespan=lifespan,
 )
 
@@ -291,7 +383,7 @@ async def health():
     return {
         "status": "ok" if st["loaded"] else "loading",
         "service": "Qwen3Guard Enterprise Suite",
-        "version": "2.6.0",
+        "version": "2.7.0",
         "device": st["device"],
         "gpu_name": st["gpu_name"],
         "models_loaded": st["loaded"],
@@ -488,42 +580,49 @@ async def openai_moderations(req: ModerationsRequest, request: Request):
 
 @app.post("/v1/guard/batch")
 async def guard_batch_detect(req: BatchGuardRequest, request: Request):
-    """Enterprise high-throughput batch content moderation REST API."""
+    """Enterprise high-throughput batch content moderation REST API (offloaded to worker thread + single disk flush)."""
     t0 = time.perf_counter()
     key_obj = resolve_request_key(request, req.api_key)
     eff_cfg = get_effective_config_for_key(key_obj)
     items = req.items[:50]
-    results = []
-    safe_cnt = 0
-    unsafe_cnt = 0
-    for idx, item in enumerate(items):
-        det = model_manager.detect_with_gen(prompt=item.prompt, response=item.response, cfg=eff_cfg)
-        audit_entry = record_full_audit(
-            request=request,
-            api_key_obj=key_obj,
-            event_type="guard_batch",
-            prompt=item.prompt,
-            response=item.response,
-            result=det,
-        )
-        if det["is_safe"]:
-            safe_cnt += 1
-        else:
-            unsafe_cnt += 1
-        results.append(
-            {
-                "id": item.id or f"item-{idx + 1}",
-                "audit_id": audit_entry["audit_id"],
-                "is_safe": det["is_safe"],
-                "action": det["action"],
-                "risk_level": det["risk_level"],
-                "risk_score": det["risk_score"],
-                "tc260": det["tc260"],
-                "attack_methods": det["security_shield"]["attack_methods"],
-                "pii_entities": det["security_shield"]["pii_entities"],
-                "latency_ms": det["latency_ms"],
-            }
-        )
+
+    def _run_batch_sync() -> Tuple[List[Dict[str, Any]], int, int]:
+        batch_results: List[Dict[str, Any]] = []
+        s_cnt = 0
+        u_cnt = 0
+        for idx, item in enumerate(items):
+            det = model_manager.detect_with_gen(prompt=item.prompt, response=item.response, cfg=eff_cfg)
+            audit_entry = record_full_audit(
+                request=request,
+                api_key_obj=key_obj,
+                event_type="guard_batch",
+                prompt=item.prompt,
+                response=item.response,
+                result=det,
+                persist=False,
+            )
+            if det["is_safe"]:
+                s_cnt += 1
+            else:
+                u_cnt += 1
+            batch_results.append(
+                {
+                    "id": item.id or f"item-{idx + 1}",
+                    "audit_id": audit_entry["audit_id"],
+                    "is_safe": det["is_safe"],
+                    "action": det["action"],
+                    "risk_level": det["risk_level"],
+                    "risk_score": det["risk_score"],
+                    "tc260": det["tc260"],
+                    "attack_methods": det["security_shield"]["attack_methods"],
+                    "pii_entities": det["security_shield"]["pii_entities"],
+                    "latency_ms": det["latency_ms"],
+                }
+            )
+        platform_store.flush_audit_logs()
+        return batch_results, s_cnt, u_cnt
+
+    results, safe_cnt, unsafe_cnt = await asyncio.to_thread(_run_batch_sync)
     total = len(results)
     return {
         "batch_id": f"batch-{int(time.time()*1000)}",
@@ -539,49 +638,99 @@ async def guard_batch_detect(req: BatchGuardRequest, request: Request):
     }
 
 
+def _mask_pii_patterns(text_val: str) -> str:
+    """Redact sensitive CN ID cards, mobile phones, and secret API keys."""
+    import re as _re
+
+    masked = _re.sub(
+        r"\b([1-9]\d{5})(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}([\dXx])\b",
+        r"\1**********\2",
+        text_val,
+    )
+    masked = _re.sub(r"\b(1[3-9]\d)\d{4}(\d{4})\b", r"\1****\2", masked)
+    masked = _re.sub(r"\b(sk-[a-zA-Z0-9]{4})[a-zA-Z0-9]{12,}([a-zA-Z0-9]{4})\b", r"\1****\2", masked)
+    masked = _re.sub(r"\b(AKIA[0-9A-Z]{4})[0-9A-Z]{8}([0-9A-Z]{4})\b", r"\1********\2", masked)
+    return masked
+
+
 @app.post("/v1/guard/deobfuscate")
 async def guard_deobfuscate(req: DeobfuscateRequest, request: Request):
-    """Dedicated REST API for de-obfuscating Base64/stuttering/fill-in-blank payloads and masking sensitive PII."""
+    """Pure CPU sub-millisecond REST API for de-obfuscating Base64/stuttering/fill-in-blank payloads and masking sensitive PII."""
+    import base64 as _b64
     import re as _re
 
     t0 = time.perf_counter()
     key_obj = resolve_request_key(request, req.api_key)
     eff_cfg = get_effective_config_for_key(key_obj)
+
     deobf_text, obf_attacks = security_shield.deobfuscate_and_unwrap(req.text)
     pii_entities = security_shield.detect_pii(deobf_text)
-    masked_text = req.text
-    if req.mask_pii:
-        masked_text = _re.sub(
-            r"\b([1-9]\d{5})(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}([\dXx])\b",
-            r"\1**********\2",
-            masked_text,
-        )
-        masked_text = _re.sub(r"\b(1[3-9]\d)\d{4}(\d{4})\b", r"\1****\2", masked_text)
-        masked_text = _re.sub(r"\b(sk-[a-zA-Z0-9]{4})[a-zA-Z0-9]{12,}([a-zA-Z0-9]{4})\b", r"\1****\2", masked_text)
 
-    det = model_manager.detect_with_gen(prompt=req.text, response=None, cfg=eff_cfg)
+    # Pure CPU multi-layer security shield evaluation (no GPU model invocation)
+    shield_res = security_shield.evaluate(
+        text=req.text,
+        cfg=eff_cfg,
+        qwen_safety="Safe",
+        qwen_categories=[],
+        response_text="",
+    )
+
+    masked_deobf_text = deobf_text
+    if req.mask_pii:
+        # Also scrub any Base64 segments in deobf_text whose decoded payload contained PII
+        for cand in _re.findall(r"\b[A-Za-z0-9+/]{24,}={0,2}\b", masked_deobf_text):
+            try:
+                dec = _b64.b64decode(cand).decode("utf-8", errors="ignore")
+                if dec and _mask_pii_patterns(dec) != dec:
+                    masked_deobf_text = masked_deobf_text.replace(cand, "[REDACTED_BASE64_PII]")
+            except Exception:
+                pass
+        masked_deobf_text = _mask_pii_patterns(masked_deobf_text)
+
+    latency_ms = round((time.perf_counter() - t0) * 1000, 2)
+    cpu_det = {
+        "is_safe": shield_res.is_safe,
+        "action": "allow" if shield_res.is_safe else "block",
+        "risk_level": shield_res.risk_level,
+        "risk_score": shield_res.risk_score,
+        "tc260": {
+            "major_code": shield_res.tc260_major_code,
+            "major_name": shield_res.tc260_major_name,
+            "sub_code": shield_res.tc260_sub_code,
+            "sub_name": shield_res.tc260_sub_name,
+        },
+        "security_shield": {
+            "attack_methods": shield_res.attack_methods,
+            "matched_rules": shield_res.matched_rules,
+            "pii_entities": pii_entities or shield_res.pii_entities,
+            "deobfuscated_text": masked_deobf_text if req.mask_pii else deobf_text,
+            "explanation": shield_res.explanation,
+        },
+        "latency_ms": latency_ms,
+    }
     audit_entry = record_full_audit(
         request=request,
         api_key_obj=key_obj,
         event_type="guard_deobfuscate",
         prompt=req.text,
         response=None,
-        result=det,
+        result=cpu_det,
+        final_output=masked_deobf_text,
     )
     return {
         "audit_id": audit_entry["audit_id"],
         "api_key": {"id": key_obj["id"], "name": key_obj["name"], "prefix": key_obj["prefix"]},
         "original_text": req.text,
-        "deobfuscated_text": deobf_text,
+        "deobfuscated_text": masked_deobf_text if req.mask_pii else deobf_text,
         "obfuscation_detected": len(obf_attacks) > 0 or deobf_text != req.text,
-        "detected_attack_methods": det["security_shield"]["attack_methods"],
-        "pii_detected": len(pii_entities) > 0,
-        "pii_entities": pii_entities,
-        "masked_text": masked_text,
-        "is_safe": det["is_safe"],
-        "risk_score": det["risk_score"],
-        "tc260": det["tc260"],
-        "latency_ms": round((time.perf_counter() - t0) * 1000, 2),
+        "detected_attack_methods": shield_res.attack_methods,
+        "pii_detected": len(pii_entities) > 0 or len(shield_res.pii_entities) > 0,
+        "pii_entities": pii_entities or shield_res.pii_entities,
+        "masked_text": masked_deobf_text,
+        "is_safe": shield_res.is_safe,
+        "risk_score": shield_res.risk_score,
+        "tc260": cpu_det["tc260"],
+        "latency_ms": latency_ms,
     }
 
 
@@ -678,23 +827,28 @@ async def guard_stream_sse(req: StreamGuardRequest, request: Request):
 async def dynamic_llm_generate(req: DynamicLLMRequest, request: Request):
     METRICS["llm_requests"] += 1
     key_obj = resolve_request_key(request, req.api_key)
-    guarded_res = model_manager.generate_llm_response(
+    eff_cfg = get_effective_config_for_key(key_obj)
+    guarded_res = await asyncio.to_thread(
+        model_manager.generate_llm_response,
         prompt=req.prompt,
         system_prompt=req.system_prompt,
         max_new_tokens=req.max_new_tokens,
         temperature=req.temperature,
         enable_thinking=req.enable_thinking,
         guarded=req.guarded,
+        cfg=eff_cfg,
     )
     unguarded_res = None
     if req.compare_unguarded:
-        unguarded_res = model_manager.generate_llm_response(
+        unguarded_res = await asyncio.to_thread(
+            model_manager.generate_llm_response,
             prompt=req.prompt,
             system_prompt=req.system_prompt,
             max_new_tokens=req.max_new_tokens,
             temperature=req.temperature,
             enable_thinking=req.enable_thinking,
             guarded=False,
+            cfg=eff_cfg,
         )
     audit_entry = record_full_audit(
         request=request,
@@ -702,7 +856,7 @@ async def dynamic_llm_generate(req: DynamicLLMRequest, request: Request):
         event_type="dynamic_llm",
         prompt=req.prompt,
         response=guarded_res.get("raw_llm_response") or (unguarded_res or {}).get("raw_llm_response") or "",
-        result=guarded_res["input_guard"] or {"is_safe": not guarded_res["blocked"]},
+        result=_select_llm_audit_result(guarded_res),
         final_output=guarded_res.get("final_response", ""),
     )
     return {
@@ -718,17 +872,20 @@ async def dynamic_llm_generate(req: DynamicLLMRequest, request: Request):
 async def openai_chat_completions(req: ChatCompletionRequest, request: Request):
     METRICS["llm_requests"] += 1
     key_obj = resolve_request_key(request, req.api_key)
+    eff_cfg = get_effective_config_for_key(key_obj)
     user_msgs = [m.content for m in req.messages if m.role == "user"]
     sys_msgs = [m.content for m in req.messages if m.role == "system"]
     prompt = user_msgs[-1] if user_msgs else ""
     sys_prompt = sys_msgs[-1] if sys_msgs else None
 
-    gen = model_manager.generate_llm_response(
+    gen = await asyncio.to_thread(
+        model_manager.generate_llm_response,
         prompt=prompt,
         system_prompt=sys_prompt,
         max_new_tokens=req.max_tokens,
         temperature=req.temperature,
         guarded=req.guarded,
+        cfg=eff_cfg,
     )
     audit_entry = record_full_audit(
         request=request,
@@ -736,7 +893,7 @@ async def openai_chat_completions(req: ChatCompletionRequest, request: Request):
         event_type="chat_completions",
         prompt=prompt,
         response=gen.get("raw_llm_response") or gen.get("final_response", ""),
-        result=gen["input_guard"] or {"is_safe": not gen["blocked"]},
+        result=_select_llm_audit_result(gen),
         final_output=gen.get("final_response", ""),
     )
     return {

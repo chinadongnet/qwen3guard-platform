@@ -1,5 +1,48 @@
 [
   {
+    "audit_id": "aud-20261020-638150-6e15",
+    "timestamp": "2026-10-20 02:33:58",
+    "api_key_id": "key_console",
+    "api_key_name": "中台默认直连通道 (Console-Default)",
+    "api_key_prefix": "qg-console",
+    "policy_preset": "tc260_standard",
+    "client_ip": "192.168.96.1",
+    "endpoint": "/v1/guard/deobfuscate",
+    "event_type": "guard_deobfuscate",
+    "prompt": "身份证 31010119880512431X Base64: MzEwMTAxMTk4ODA1MTI0MzFY",
+    "response": "",
+    "deobfuscated_text": "身份证 310101**********X Base64: [REDACTED_BASE64_PII]\n[Base64解码]: 310101**********X",
+    "is_safe": false,
+    "action": "block",
+    "risk_level": "Unsafe",
+    "risk_score": 0.892,
+    "tc260": {
+      "major_code": "A.4",
+      "major_name": "侵犯他人合法权益",
+      "sub_code": "A.4.6",
+      "sub_name": "侵害他人个人信息权益"
+    },
+    "qwen_guard_raw": "",
+    "qwen_categories": [],
+    "refusal": "No",
+    "attack_methods": [
+      "Base64编码混淆"
+    ],
+    "matched_rules": [
+      "隐私敏感实体:公民身份证号(CN_ID_CARD)"
+    ],
+    "pii_entities": [
+      "公民身份证号(CN_ID_CARD)"
+    ],
+    "explanation": "TC260分类[A.4.6 侵害他人个人信息权益]；攻击手法[Base64编码混淆]；PII风险[公民身份证号(CN_ID_CARD)]",
+    "stream_cutoff": null,
+    "final_output": "身份证 310101**********X Base64: [REDACTED_BASE64_PII]\n[Base64解码]: 310101**********X",
+    "latency_ms": 16.98,
+    "review_status": "auto_block",
+    "reviewer_note": "",
+    "promoted_case_id": null
+  },
+  {
     "audit_id": "aud-20261020-019339-4b33",
     "timestamp": "2026-10-20 01:33:39",
     "api_key_id": "key_1792396401390",

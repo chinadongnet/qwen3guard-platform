@@ -62,12 +62,11 @@ class InferencePool:
 
 class LocalModels:
     def __init__(self):
-        self.manager = None
+        from app.model_manager import model_manager
+        self.manager = model_manager
 
     def load(self):
-        from app.model_manager import model_manager
-        model_manager.load_all()
-        self.manager = model_manager
+        self.manager.load_all()
 
     def status(self):
         if not self.manager:

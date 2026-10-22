@@ -82,7 +82,10 @@ def create_app(settings=None, models=None):
                 raise RuntimeError("Initial deployment requires BOOTSTRAP_ADMIN_PASSWORD")
             db.insert(t.users, username=settings.admin_user, password_hash=hash_password(settings.admin_password),
                       is_admin=True, enabled=True)
-        await asyncio.to_thread(models.load)
+        if settings.testing:
+            await asyncio.to_thread(models.load)
+        else:
+            asyncio.create_task(asyncio.to_thread(models.load))
         if not settings.testing:
             runner.start()
         try:

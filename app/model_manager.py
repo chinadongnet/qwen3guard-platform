@@ -16,14 +16,65 @@ from app.security_shield import ShieldResult, security_shield
 
 
 def resolve_model_root() -> Path:
-    """Prefer Linux ext4 volume (/models) inside Docker for 1-second safetensors load, fallback to workspace models/."""
+    """Prefer custom model root, fallback to local workspace models/ or ext4 volume (/models)."""
     env_root = os.environ.get("QWENGUARD_MODEL_ROOT")
     if env_root and Path(env_root).exists():
         return Path(env_root)
+    workspace_models = ROOT_DIR / "models"
+    if workspace_models.exists():
+        return workspace_models
     docker_vol = Path("/models")
     if docker_vol.exists() and (docker_vol / "Qwen3Guard-Gen-0.6B").exists():
         return docker_vol
-    return ROOT_DIR / "models"
+    return workspace_models
+
+
+MODEL_REGISTRY = {
+    "Qwen3Guard-Gen-0.6B": {
+        "ms_id": "Qwen/Qwen3Guard-Gen-0.6B",
+        "hf_id": "Qwen/Qwen3Guard-Gen-0.6B",
+        "role": "生成式安全分类与拒答判定模型 (Input/Output Guard)",
+    },
+    "Qwen3Guard-Stream-0.6B": {
+        "ms_id": "Qwen/Qwen3Guard-Stream-0.6B",
+        "hf_id": "Qwen/Qwen3Guard-Stream-0.6B",
+        "role": "Token级实时流式安全检测与熔断模型 (Token Stream Guard)",
+    },
+    "Qwen3-0.6B": {
+        "ms_id": "Qwen/Qwen3-0.6B",
+        "hf_id": "Qwen/Qwen3-0.6B",
+        "role": "动态自测与对话生成小参数大模型 (Dynamic Self-Test LLM)",
+    },
+}
+
+
+def resolve_model_dir(model_name: str, root_dir: Path) -> str:
+    """Resolve local path or auto-download from ModelScope / HuggingFace Hub."""
+    local_dir = root_dir / model_name
+    if local_dir.exists() and any(local_dir.iterdir()):
+        return str(local_dir)
+
+    meta = MODEL_REGISTRY.get(model_name)
+    if not meta:
+        return str(local_dir)
+
+    # Attempt automatic download from ModelScope (high speed in CN mainland)
+    try:
+        from modelscope.hub.snapshot_download import snapshot_download as ms_download
+        local_dir.mkdir(parents=True, exist_ok=True)
+        downloaded = ms_download(meta["ms_id"], local_dir=str(local_dir))
+        return str(downloaded)
+    except Exception:
+        pass
+
+    # Fallback to HuggingFace Hub
+    try:
+        from huggingface_hub import snapshot_download as hf_download
+        local_dir.mkdir(parents=True, exist_ok=True)
+        downloaded = hf_download(repo_id=meta["hf_id"], local_dir=str(local_dir))
+        return str(downloaded)
+    except Exception:
+        return str(local_dir)
 
 
 SAFETY_RE = re.compile(r"Safety:\s*(Safe|Unsafe|Controversial)", re.IGNORECASE)
@@ -42,6 +93,18 @@ class ModelManager:
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.dtype = torch.bfloat16 if self.device == "cuda" else torch.float32
         self._lock = threading.RLock()
+
+        # Ampere (RTX 3090 / Compute Capability 8.6) hardware optimizations
+        if self.device == "cuda":
+            try:
+                major, _ = torch.cuda.get_device_capability(0)
+                if major >= 8:
+                    torch.backends.cuda.matmul.allow_tf32 = True
+                    torch.backends.cudnn.allow_tf32 = True
+                    if hasattr(torch, "set_float32_matmul_precision"):
+                        torch.set_float32_matmul_precision("high")
+            except Exception:
+                pass
 
         self.gen_tokenizer: Any = None
         self.gen_model: Any = None
@@ -66,7 +129,7 @@ class ModelManager:
 
             try:
                 # 1. Load Qwen3Guard-Gen-0.6B
-                gen_path = str(self.model_root / "Qwen3Guard-Gen-0.6B")
+                gen_path = resolve_model_dir("Qwen3Guard-Gen-0.6B", self.model_root)
                 t0 = time.perf_counter()
                 self.gen_tokenizer = AutoTokenizer.from_pretrained(gen_path, trust_remote_code=True)
                 self.gen_model = AutoModelForCausalLM.from_pretrained(
@@ -81,7 +144,7 @@ class ModelManager:
                 self.gen_load_ms = round((time.perf_counter() - t0) * 1000, 1)
 
                 # 2. Load Qwen3Guard-Stream-0.6B
-                stream_path = str(self.model_root / "Qwen3Guard-Stream-0.6B")
+                stream_path = resolve_model_dir("Qwen3Guard-Stream-0.6B", self.model_root)
                 t1 = time.perf_counter()
                 self.stream_tokenizer = AutoTokenizer.from_pretrained(stream_path, trust_remote_code=True)
                 self.stream_model = AutoModel.from_pretrained(
@@ -96,7 +159,7 @@ class ModelManager:
                 self.stream_load_ms = round((time.perf_counter() - t1) * 1000, 1)
 
                 # 3. Load Qwen3-0.6B (Dynamic Small LLM for self-testing)
-                llm_path = str(self.model_root / "Qwen3-0.6B")
+                llm_path = resolve_model_dir("Qwen3-0.6B", self.model_root)
                 t2 = time.perf_counter()
                 self.llm_tokenizer = AutoTokenizer.from_pretrained(llm_path, trust_remote_code=True)
                 self.llm_model = AutoModelForCausalLM.from_pretrained(
@@ -119,23 +182,37 @@ class ModelManager:
             return self.status()
 
     def status(self) -> Dict[str, Any]:
-        gpu_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
-        vram_alloc_mb = (
-            round(torch.cuda.memory_allocated(0) / (1024 * 1024), 1)
-            if torch.cuda.is_available()
-            else 0.0
-        )
-        vram_total_mb = (
-            round(torch.cuda.get_device_properties(0).total_memory / (1024 * 1024), 1)
-            if torch.cuda.is_available()
-            else 0.0
-        )
+        is_cuda = torch.cuda.is_available()
+        gpu_name = torch.cuda.get_device_name(0) if is_cuda else "CPU"
+        compute_cap = "N/A"
+        cuda_version = None
+        tf32_enabled = False
+        vram_alloc_mb = 0.0
+        vram_reserved_mb = 0.0
+        vram_total_mb = 0.0
+
+        if is_cuda:
+            try:
+                cap = torch.cuda.get_device_capability(0)
+                compute_cap = f"{cap[0]}.{cap[1]}"
+                cuda_version = getattr(torch.version, "cuda", None)
+                tf32_enabled = bool(getattr(torch.backends.cuda.matmul, "allow_tf32", False))
+                vram_alloc_mb = round(torch.cuda.memory_allocated(0) / (1024 * 1024), 1)
+                vram_reserved_mb = round(torch.cuda.memory_reserved(0) / (1024 * 1024), 1)
+                vram_total_mb = round(torch.cuda.get_device_properties(0).total_memory / (1024 * 1024), 1)
+            except Exception:
+                pass
+
         return {
             "loaded": self.loaded,
             "device": self.device,
             "gpu_name": gpu_name,
+            "compute_capability": compute_cap,
+            "cuda_version": cuda_version,
+            "tf32_enabled": tf32_enabled,
             "dtype": str(self.dtype),
             "vram_allocated_mb": vram_alloc_mb,
+            "vram_reserved_mb": vram_reserved_mb,
             "vram_total_mb": vram_total_mb,
             "model_root": str(self.model_root),
             "models": {

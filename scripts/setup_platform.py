@@ -22,6 +22,7 @@ def main():
     (backup / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     password = secrets.token_urlsafe(24)
     values = {
+        "DATABASE_URL": "sqlite:///data/platform.db",
         "POSTGRES_PASSWORD": secrets.token_urlsafe(32),
         "PLATFORM_SECRET": secrets.token_urlsafe(48),
         "BOOTSTRAP_ADMIN_USER": "admin",

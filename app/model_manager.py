@@ -48,6 +48,21 @@ MODEL_REGISTRY = {
 }
 
 
+def _patch_stream_transformers_compatibility() -> None:
+    """Ensure transformers 5.x compatibility for Qwen3Guard-Stream RoPE and pad_token_id."""
+    try:
+        import transformers.modeling_rope_utils as rope_utils
+        if hasattr(rope_utils, "ROPE_INIT_FUNCTIONS") and "default" not in rope_utils.ROPE_INIT_FUNCTIONS:
+            def _default_rope_init(config: Any, device: Any = None, seq_len: Any = None, **kwargs: Any) -> Tuple[Any, float]:
+                dim = getattr(config, "head_dim", None) or (config.hidden_size // config.num_attention_heads)
+                base = getattr(config, "rope_theta", 10000.0)
+                inv_freq = 1.0 / (base ** (torch.arange(0, dim, 2, dtype=torch.int64).float().to(device) / dim))
+                return inv_freq, 1.0
+            rope_utils.ROPE_INIT_FUNCTIONS["default"] = _default_rope_init
+    except Exception:
+        pass
+
+
 def resolve_model_dir(model_name: str, root_dir: Path) -> str:
     """Resolve local path or auto-download from ModelScope / HuggingFace Hub."""
     local_dir = root_dir / model_name
@@ -144,11 +159,17 @@ class ModelManager:
                 self.gen_load_ms = round((time.perf_counter() - t0) * 1000, 1)
 
                 # 2. Load Qwen3Guard-Stream-0.6B
+                _patch_stream_transformers_compatibility()
+                from transformers import AutoConfig
                 stream_path = resolve_model_dir("Qwen3Guard-Stream-0.6B", self.model_root)
                 t1 = time.perf_counter()
                 self.stream_tokenizer = AutoTokenizer.from_pretrained(stream_path, trust_remote_code=True)
+                stream_cfg = AutoConfig.from_pretrained(stream_path, trust_remote_code=True)
+                if not hasattr(stream_cfg, "pad_token_id") or stream_cfg.pad_token_id is None:
+                    stream_cfg.pad_token_id = getattr(self.stream_tokenizer, "pad_token_id", 151643) or 151643
                 self.stream_model = AutoModel.from_pretrained(
                     stream_path,
+                    config=stream_cfg,
                     torch_dtype=self.dtype,
                     device_map="auto" if self.device == "cuda" else None,
                     trust_remote_code=True,

@@ -5,6 +5,24 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
+def _load_env_file() -> None:
+    env_file = Path(__file__).resolve().parents[2] / ".env"
+    if env_file.exists():
+        try:
+            for line in env_file.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    k, v = k.strip(), v.strip()
+                    if k not in os.environ:
+                        os.environ[k] = v
+        except Exception:
+            pass
+
+
+_load_env_file()
+
+
 @dataclass
 class Settings:
     database_url: str = field(default_factory=lambda: os.getenv(

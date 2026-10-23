@@ -1,4 +1,4 @@
-import {esc,date,number} from "./api.js?v=3.2.1";
+import {esc,date,number} from "./api.js?v=3.2.2";
 export const button=(label,action,id="",kind="")=>`<button type="button" class="${esc(kind)}" data-action="${esc(action)}" data-id="${esc(id)}">${esc(label)}</button>`;
 export const badge=(value)=>{
   const labels={allow:"放行",block:"阻断",mask:"脱敏",review:"待复核",completed:"已完成",error:"执行失败",timeout:"超时",safe:"安全",unsafe:"风险",indeterminate:"未确定",production:"生产",sandbox:"沙盒",queued:"排队中",running:"执行中",cancelled:"已取消",interrupted:"已中断",failed:"失败",open:"待处理",investigating:"处理中",resolved:"已解决",false_positive:"误报",delivered:"已送达",pending:"待投递",high:"高",medium:"中",low:"低",legacy_unknown:"历史未核验"};

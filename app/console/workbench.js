@@ -1,6 +1,6 @@
-import {api,state,scoped,esc,date,number,can,notify} from "./api.js?v=3.2.1";
-import {button,badge,empty,panel,table,heading,field,formModal,modal,json,metric} from "./components.js?v=3.2.1";
-import {AB_SAMPLES,DETECT_PRESETS,STREAM_PRESETS,LLM_PRESETS} from "./samples.js?v=3.2.1";
+import {api,state,scoped,esc,date,number,can,notify,uuid,copyText} from "./api.js?v=3.2.2";
+import {button,badge,empty,panel,table,heading,field,formModal,modal,json,metric} from "./components.js?v=3.2.2";
+import {AB_SAMPLES,DETECT_PRESETS,STREAM_PRESETS,LLM_PRESETS} from "./samples.js?v=3.2.2";
 let ui;
 export const initWorkbench=value=>{ui=value;};
 const base="/api/admin/workbench";
@@ -151,7 +151,7 @@ export const workbenchActions={
     const ids=state.cache.bankSelection||[];
     const items=await apps();appRequired(items);
     formModal(ids.length?`评测选中 ${ids.length} 条`:"评测整个题库",selectedApp(items)+field("mode","评测方式",{wide:true,options:[{value:"text",label:"文本审核回归"},{value:"generation_compare",label:"批量裸模型 / 护栏攻防对比"}]})+field("target","审核对象",{wide:true,options:[{value:"auto",label:"按题库标注对象（推荐）"},{value:"input",label:"仅输入审核"},{value:"output",label:"仅已有回复审核"}],help:"输入标签不能给回复评分。输出评测使用 response_expected_unsafe；未标注只展示检测结果。"})+field("sample_count","样本量上限（可选）",{type:"number",min:1,max:5000,required:false,help:"留空评测全库；生成对比每任务最多 50 条。"})+field("policy_version","候选版本（可选）",{type:"number",min:1,required:false}),async v=>{
-      const r=await api(scoped(`${base}/banks/evaluate`),{method:"POST",body:{application_id:v.application_id,dataset:state.cache.bankFilter?.dataset||"curated",case_ids:ids,mode:v.mode,target:v.target,sample_count:v.sample_count?Number(v.sample_count):null,policy_version:v.policy_version?Number(v.policy_version):null,idempotency_key:crypto.randomUUID()}});
+      const r=await api(scoped(`${base}/banks/evaluate`),{method:"POST",body:{application_id:v.application_id,dataset:state.cache.bankFilter?.dataset||"curated",case_ids:ids,mode:v.mode,target:v.target,sample_count:v.sample_count?Number(v.sample_count):null,policy_version:v.policy_version?Number(v.policy_version):null,idempotency_key:uuid()}});
       await ui.saved(`后台任务已提交：${r.id.slice(0,12)}`);ui.navigate("evaluations");
     },"提交评测","全库评测可能耗时较长，支持取消和恢复，结果与生产指标隔离。");
   },
@@ -205,7 +205,7 @@ export const workbenchActions={
     },"应用到请求");
   },
   "generate-sdk"(){const f=document.getElementById("portal-form");document.getElementById("sdk-code").textContent=sdk(document.getElementById("sdk-language").value,f.elements.endpoint.value,endpointExamples[f.elements.endpoint.value]===null?null:JSON.parse(f.elements.body.value));},
-  async "copy-sdk"(){await navigator.clipboard.writeText(document.getElementById("sdk-code").textContent);notify("接入代码已复制");}
+  async "copy-sdk"(){await copyText(document.getElementById("sdk-code").textContent);notify("接入代码已复制");}
 };
 function auditExport(format){
   const f=state.cache.detectionFilter||{},p=new URLSearchParams({format});

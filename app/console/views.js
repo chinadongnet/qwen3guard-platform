@@ -1,6 +1,6 @@
-import {api,state,scoped,esc,date,number,can} from "./api.js?v=3.2.1";
-import {button,badge,empty,panel,table,metric,heading,detectionTable,json} from "./components.js?v=3.2.1";
-import {renderWorkbench} from "./workbench.js?v=3.2.1";
+import {api,state,scoped,esc,date,number,can} from "./api.js?v=3.2.2";
+import {button,badge,empty,panel,table,metric,heading,detectionTable,json} from "./components.js?v=3.2.2";
+import {renderWorkbench} from "./workbench.js?v=3.2.2";
 
 export const pages=[
   ["overview","运营总览","◈"],["applications","应用接入","▦"],["detections","检测记录","≡"],

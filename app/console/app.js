@@ -1,7 +1,7 @@
-import {api,state,scoped,esc,date,notify,can} from "./api.js?v=3.2.1";
-import {pages,shell,loginView,renderPage} from "./views.js?v=3.2.1";
-import {button,badge,empty,panel,table,json,modal,field,formModal} from "./components.js?v=3.2.1";
-import {workbenchActions,initWorkbench} from "./workbench.js?v=3.2.1";
+import {api,state,scoped,esc,date,notify,can,uuid,copyText} from "./api.js?v=3.2.2";
+import {pages,shell,loginView,renderPage} from "./views.js?v=3.2.2";
+import {button,badge,empty,panel,table,json,modal,field,formModal} from "./components.js?v=3.2.2";
+import {workbenchActions,initWorkbench} from "./workbench.js?v=3.2.2";
 
 const root=document.getElementById("root"),dialog=document.getElementById("dialog");
 const close=()=>{dialog.close();dialog.innerHTML="";};
@@ -118,7 +118,7 @@ const actions={
   "revoke-key"(id){
     formModal("撤销凭证","",async()=>{await api(`/api/admin/keys/${id}/revoke`,{method:"POST"});await saved("凭证已撤销");},"确认撤销","撤销后，此密钥的新请求将立即被拒绝。");
   },
-  async "copy-secret"(){await navigator.clipboard.writeText(document.getElementById("one-time-secret").textContent);notify("已复制，请妥善保存");},
+  async "copy-secret"(){await copyText(document.getElementById("one-time-secret").textContent);notify("已复制，请妥善保存");},
   "test-application"(id){
     formModal("验证应用接入",field("prompt","待检测文本",{type:"textarea",wide:true,value:"请介绍如何整理会议纪要。"})+
       field("response","模型回复（可选）",{type:"textarea",wide:true,required:false}),async values=>{
@@ -170,7 +170,7 @@ const actions={
       field("policy_version","候选策略版本（可选）",{type:"number",required:false,min:1,wide:true,help:"留空使用当前已发布版本；填写草稿版本可完成发布前回归门禁。"})+
       field("items","JSON 样本数组",{type:"textarea",rows:8,wide:true,value:JSON.stringify([{prompt:"请介绍办公室节约用电的方法。",expected_unsafe:false}],null,2),help:"最多 500 条。prompt 必填，response、expected_unsafe 可选；提交时自动生成数据集哈希。"}),async values=>{
         let items;try{items=JSON.parse(values.items);}catch{throw new Error("样本必须是有效的 JSON 数组");}
-        await api(scoped("/api/admin/evaluations"),{method:"POST",body:{name:values.name,application_id:values.application_id,endpoint_id:values.endpoint_id||null,policy_version:values.policy_version?Number(values.policy_version):null,items,idempotency_key:crypto.randomUUID()}});
+        await api(scoped("/api/admin/evaluations"),{method:"POST",body:{name:values.name,application_id:values.application_id,endpoint_id:values.endpoint_id||null,policy_version:values.policy_version?Number(values.policy_version):null,items,idempotency_key:uuid()}});
         await saved("评测任务已进入队列");
       },"提交评测","任务使用提交时的策略版本；不会修改生产策略。对外部端点的调用可能产生供应商费用。");
   },

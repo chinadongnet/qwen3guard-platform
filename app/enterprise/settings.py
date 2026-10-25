@@ -47,5 +47,5 @@ class Settings:
             raise RuntimeError("AUDIT_RAW_RETENTION_DAYS must be between 1 and 365")
         if len(self.secret) < 32:
             raise RuntimeError("PLATFORM_SECRET must contain at least 32 characters; run scripts/setup_platform.py")
-        if self.admin_password and len(self.admin_password) < 12:
-            raise RuntimeError("Bootstrap password must contain at least 12 characters")
+        if self.admin_password and len(self.admin_password) < 8:
+            raise RuntimeError("Bootstrap password must contain at least 8 characters")

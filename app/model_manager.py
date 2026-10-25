@@ -49,7 +49,7 @@ MODEL_REGISTRY = {
 
 
 def _patch_stream_transformers_compatibility() -> None:
-    """Ensure transformers 5.x compatibility for Qwen3Guard-Stream RoPE and pad_token_id."""
+    """Ensure transformers 5.x compatibility for Qwen3Guard-Stream RoPE, pad_token_id, and causal mask kwargs."""
     try:
         import transformers.modeling_rope_utils as rope_utils
         if hasattr(rope_utils, "ROPE_INIT_FUNCTIONS") and "default" not in rope_utils.ROPE_INIT_FUNCTIONS:
@@ -59,6 +59,26 @@ def _patch_stream_transformers_compatibility() -> None:
                 inv_freq = 1.0 / (base ** (torch.arange(0, dim, 2, dtype=torch.int64).float().to(device) / dim))
                 return inv_freq, 1.0
             rope_utils.ROPE_INIT_FUNCTIONS["default"] = _default_rope_init
+    except Exception:
+        pass
+
+    try:
+        import inspect
+        import transformers.masking_utils as mu
+        for fn_name in ("create_causal_mask", "create_sliding_window_causal_mask"):
+            fn = getattr(mu, fn_name, None)
+            if fn and not getattr(fn, "_qg_compat_patched", False):
+                sig_params = set(inspect.signature(fn).parameters.keys())
+                def _make_compat(orig_fn: Any, params: set[str]) -> Any:
+                    def _wrapped(*args: Any, **kwargs: Any) -> Any:
+                        if "input_embeds" in kwargs and "inputs_embeds" in params and "inputs_embeds" not in kwargs:
+                            kwargs["inputs_embeds"] = kwargs.pop("input_embeds")
+                        if "cache_position" in kwargs and "cache_position" not in params:
+                            kwargs.pop("cache_position", None)
+                        return orig_fn(*args, **kwargs)
+                    _wrapped._qg_compat_patched = True  # type: ignore[attr-defined]
+                    return _wrapped
+                setattr(mu, fn_name, _make_compat(fn, sig_params))
     except Exception:
         pass
 
@@ -174,6 +194,16 @@ class ModelManager:
                     device_map="auto" if self.device == "cuda" else None,
                     trust_remote_code=True,
                 )
+                try:
+                    import sys
+                    import transformers.masking_utils as mu
+                    mod = sys.modules.get(self.stream_model.__class__.__module__)
+                    if mod:
+                        for fn_name in ("create_causal_mask", "create_sliding_window_causal_mask"):
+                            if hasattr(mu, fn_name):
+                                setattr(mod, fn_name, getattr(mu, fn_name))
+                except Exception:
+                    pass
                 if self.device != "cuda":
                     self.stream_model.to(self.device)
                 self.stream_model.eval()

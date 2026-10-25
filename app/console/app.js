@@ -1,7 +1,7 @@
-import {api,state,scoped,esc,date,notify,can,uuid,copyText} from "./api.js?v=3.2.2";
-import {pages,shell,loginView,renderPage} from "./views.js?v=3.2.2";
-import {button,badge,empty,panel,table,json,modal,field,formModal} from "./components.js?v=3.2.2";
-import {workbenchActions,initWorkbench} from "./workbench.js?v=3.2.2";
+import {api,state,scoped,esc,date,notify,can,uuid,copyText} from "./api.js?v=3.2.4";
+import {pages,shell,loginView,renderPage} from "./views.js?v=3.2.4";
+import {button,badge,empty,panel,table,json,modal,field,formModal} from "./components.js?v=3.2.4";
+import {workbenchActions,initWorkbench} from "./workbench.js?v=3.2.4";
 
 const root=document.getElementById("root"),dialog=document.getElementById("dialog");
 const close=()=>{dialog.close();dialog.innerHTML="";};
@@ -195,7 +195,7 @@ const actions={
   },
   async "disable-hook"(id){await api(`/api/admin/webhooks/${id}/disable`,{method:"POST"});await saved("通知渠道已停用");},
   "new-user"(){
-    formModal("创建成员账户",field("username","用户名",{wide:true})+field("password","初始密码",{type:"password",wide:true,help:"至少 12 个字符。创建后需加入项目才拥有项目权限。"}),async values=>{
+    formModal("创建成员账户",field("username","用户名",{wide:true})+field("password","初始密码",{type:"password",wide:true,help:"至少 8 个字符。创建后需加入项目才拥有项目权限。"}),async values=>{
       await api("/api/admin/users",{method:"POST",body:values});await saved("账户已创建，请将成员加入项目");
     },"创建账户");
   },

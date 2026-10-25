@@ -1,12 +1,13 @@
-import {esc,date,number} from "./api.js?v=3.2.2";
+import {esc,date,number} from "./api.js?v=3.2.4";
 export const button=(label,action,id="",kind="")=>`<button type="button" class="${esc(kind)}" data-action="${esc(action)}" data-id="${esc(id)}">${esc(label)}</button>`;
+export const disabledButton=(label,reason="该功能尚未开发完成",kind="small")=>`<button type="button" class="disabled-feature ${esc(kind)}" disabled title="${esc(reason)}" aria-disabled="true">${esc(label)} <span class="todo-pill">待开发</span></button>`;
 export const badge=(value)=>{
-  const labels={allow:"放行",block:"阻断",mask:"脱敏",review:"待复核",completed:"已完成",error:"执行失败",timeout:"超时",safe:"安全",unsafe:"风险",indeterminate:"未确定",production:"生产",sandbox:"沙盒",queued:"排队中",running:"执行中",cancelled:"已取消",interrupted:"已中断",failed:"失败",open:"待处理",investigating:"处理中",resolved:"已解决",false_positive:"误报",delivered:"已送达",pending:"待投递",high:"高",medium:"中",low:"低",legacy_unknown:"历史未核验"};
-  const cls=["allow","safe","completed","resolved","delivered"].includes(value)?"good":["block","unsafe","error","failed"].includes(value)?"bad":["timeout","review","open","interrupted"].includes(value)?"warn":"info";
+  const labels={allow:"放行",block:"阻断",mask:"脱敏",review:"待复核",completed:"已完成",error:"执行失败",timeout:"超时",safe:"安全",unsafe:"风险",indeterminate:"未确定",production:"生产",sandbox:"沙盒",queued:"排队中",running:"执行中",cancelled:"已取消",interrupted:"已中断",failed:"失败",open:"待处理",investigating:"处理中",resolved:"已解决",false_positive:"误报",delivered:"已送达",pending:"待投递",high:"高",medium:"中",low:"低",legacy_unknown:"历史未核验",todo:"待开发"};
+  const cls=["allow","safe","completed","resolved","delivered"].includes(value)?"good":["block","unsafe","error","failed"].includes(value)?"bad":["timeout","review","open","interrupted"].includes(value)?"warn":value==="todo"?"todo":"info";
   return `<span class="badge ${cls}">${esc(labels[value]||value)}</span>`;
 };
 export const empty=(title,description,action="")=>`<div class="empty"><div class="empty-symbol">◇</div><h3>${esc(title)}</h3><p>${esc(description)}</p>${action}</div>`;
-export const panel=(title,body,action="")=>`<section class="panel"><div class="panel-head"><h2>${esc(title)}</h2>${action}</div>${body}</section>`;
+export const panel=(title,body,action="")=>`<section class="panel"><div class="panel-head"><h2>${esc(title)}</h2><div class="actions">${action}</div></div>${body}</section>`;
 export const table=(columns,rows)=>`<div class="table-scroll"><table><thead><tr>${columns.map(c=>`<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>${rows.join("")}</tbody></table></div>`;
 export const metric=(label,value,note)=>`<div class="metric"><div class="metric-label">${esc(label)}</div><div class="metric-value">${esc(value)}</div><div class="metric-note">${esc(note)}</div></div>`;
 export const heading=(title,description,actions="")=>`<div class="page-head"><div><div class="eyebrow">QWENGUARD / WORKSPACE</div><h1>${esc(title)}</h1><p>${esc(description)}</p></div><div class="actions">${actions}</div></div>`;
@@ -20,7 +21,7 @@ export function modal(title,body){
 export function field(name,label,options={}){
   let control;
   const attr=`id="field-${esc(name)}" name="${esc(name)}" ${options.required===false?"":"required"}`;
-  if(options.options)control=`<select ${attr}>${options.options.map(v=>`<option value="${esc(v.value)}" ${v.value===options.value?"selected":""}>${esc(v.label)}</option>`).join("")}</select>`;
+  if(options.options)control=`<select ${attr}>${options.options.map(v=>`<option value="${esc(v.value)}" ${v.value===options.value?"selected":""} ${v.disabled?"disabled":""}>${esc(v.label)}</option>`).join("")}</select>`;
   else if(options.type==="textarea")control=`<textarea ${attr} rows="${options.rows||4}">${esc(options.value||"")}</textarea>`;
   else control=`<input ${attr} type="${esc(options.type||"text")}" value="${esc(options.value||"")}" ${options.min!==undefined?`min="${options.min}"`:""} ${options.max!==undefined?`max="${options.max}"`:""} ${options.step?`step="${options.step}"`:""} ${options.minLength!==undefined?`minlength="${options.minLength}"`:""} ${options.maxLength!==undefined?`maxlength="${options.maxLength}"`:""} autocomplete="${esc(options.autocomplete||"off")}">`;
   return `<div class="field${options.wide?" wide":""}"><label for="field-${esc(name)}">${esc(label)}</label>${control}${options.help?`<div class="help">${esc(options.help)}</div>`:""}</div>`;

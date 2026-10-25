@@ -1,7 +1,7 @@
-import {api,state,scoped,esc,date,notify,can,uuid,copyText} from "./api.js?v=3.2.3";
-import {pages,shell,loginView,renderPage} from "./views.js?v=3.2.3";
-import {button,badge,empty,panel,table,json,modal,field,formModal} from "./components.js?v=3.2.3";
-import {workbenchActions,initWorkbench} from "./workbench.js?v=3.2.3";
+import {api,state,scoped,esc,date,notify,can,uuid,copyText} from "./api.js?v=3.2.4";
+import {pages,shell,loginView,renderPage} from "./views.js?v=3.2.4";
+import {button,badge,empty,panel,table,json,modal,field,formModal} from "./components.js?v=3.2.4";
+import {workbenchActions,initWorkbench} from "./workbench.js?v=3.2.4";
 
 const root=document.getElementById("root"),dialog=document.getElementById("dialog");
 const close=()=>{dialog.close();dialog.innerHTML="";};

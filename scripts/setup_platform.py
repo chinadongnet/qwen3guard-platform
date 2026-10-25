@@ -1,8 +1,10 @@
 """Create local deployment secrets and a dated backup without overwriting existing files."""
 from pathlib import Path
 import json
+import os
 import secrets
 import shutil
+import sys
 from datetime import datetime, timezone
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,7 +22,8 @@ def main():
         shutil.copy2(source, backup / source.name)
         manifest.append({"name": source.name, "bytes": source.stat().st_size})
     (backup / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-    password = "admin123"
+    dev_mode = "--dev" in sys.argv[1:] or os.getenv("BOOTSTRAP_DEV_MODE", "").lower() in {"1", "true", "yes"}
+    password = "admin123" if dev_mode else secrets.token_urlsafe(24)
     values = {
         "DATABASE_URL": "sqlite:///data/platform.db",
         "POSTGRES_PASSWORD": secrets.token_urlsafe(32),

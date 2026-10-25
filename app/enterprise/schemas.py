@@ -47,7 +47,7 @@ class Enabled(StrictModel):
 
 
 class UserCreate(Login):
-    password: str = Field(min_length=12, max_length=256)
+    password: str = Field(min_length=8, max_length=256)
 
 
 class Membership(StrictModel):

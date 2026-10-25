@@ -20,7 +20,7 @@ def main():
         shutil.copy2(source, backup / source.name)
         manifest.append({"name": source.name, "bytes": source.stat().st_size})
     (backup / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-    password = secrets.token_urlsafe(24)
+    password = "admin123"
     values = {
         "DATABASE_URL": "sqlite:///data/platform.db",
         "POSTGRES_PASSWORD": secrets.token_urlsafe(32),

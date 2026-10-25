@@ -1,10 +1,55 @@
-# P0 / P1 首版交付状态
+# P0 / P1 交付状态与功能有效性核查清单
 
-更新：2026-10-20。本表是首版交付记录；本次补回的原版功能及当前验证以 [功能覆盖表](feature-coverage.md) 为准。当前运行入口 `http://127.0.0.1:8092/dashboard`，平台版本 3.0.0。支持文本审核，不支持图片、音频、视频或文档文件审核。
+更新：2026-10-25。本表汇总当前平台版本 `3.0.0`（运行入口 `http://127.0.0.1:8092/dashboard` 及局域网 HTTP 控制台）中**已生效可用**与**尚未开发完成（已在控制台界面置灰 `disabled` + `待开发` 标签）**的全部功能。原版功能映射见 [功能覆盖表](feature-coverage.md)，全量 GPU 质量回归见 [全量模型质量验收](model-quality-acceptance.md)。
 
-后续质量验收已完成 1607 条全量真实 GPU 推理、最终规则全量复判及 9 条变化样本 GPU 复测，工程回归增至 59 项。最新结果和质量限制见 [全量模型质量验收](model-quality-acceptance.md)；下文 34 项测试等是首版历史记录。
+## 一、已有效并完整闭环的功能清单（✅ 可直接使用）
 
-## 已交付
+| 模块 / 页面 | 已生效功能 | 后端接口 / 核心实现 |
+| --- | --- | --- |
+| **登录与账户权限** | 管理员与成员登录、会话 Cookie + CSRF 校验、登录限流、修改个人密码（撤销该用户全部活跃会话）、项目创建、项目成员角色分配（`admin` / `operator` / `developer` / `auditor`）、新增成员账户 | `/api/admin/auth/*`、`/api/admin/projects/*`、`/api/admin/users`（`admin.py`、`security.py`） |
+| **Native GPU 与局域网部署** | Windows 原生 RTX 3090 GPU 加速启动、后台异步非阻塞加载三模型（`Qwen3-0.6B`、`Qwen3Guard-Gen-0.6B`、`Qwen3Guard-Stream-0.6B`）、`transformers 5.x` RoPE/pad_token 兼容补丁、非 HTTPS 局域网 IP 访问下的 UUID 生成与剪贴板降级兼容 | `start.ps1`、`app/model_manager.py`、`app/console/api.js` |
+| **运营总览 (`overview`)** | 按生产/沙盒环境及 24h / 7d / 30d 时间窗统计真实检测条目、检测成功率、P50/P95/P99 耗时、阻断数与阻断率、待处理风险事件数、最近检测列表（自动排除评测与历史未知数据） | `GET /api/admin/overview`（`admin.py`） |
+| **应用接入 (`applications`)** | 创建业务应用、编辑应用设置（名称、生产/沙盒环境、绑定已发布策略）、启用/停用应用、控制台在线验证接入（沙盒隔离）；API Key 创建（仅首次显示明文、仅存哈希）、列表脱敏、RPM 额度与暂停/恢复设置、密钥轮换（24h 过渡期）、立即撤销 | `/api/admin/applications/*`、`/api/admin/keys/*`（`admin.py`） |
+| **检测记录 (`detections`)** | 按应用 ID、凭证 ID、Request ID、决策、来源、归档状态筛选与游标分页；查看检测详情；受控调阅加密原文（限角色、留痕、默认 7 天过期返回 410）；追加人工复核；沉淀为题库样本；JSON / CSV 导出（防公式注入）；当前页归档与恢复 | `/api/admin/detections/*`、`/api/admin/workbench/detections/*`、`/audit/*`（`admin.py`、`workbench.py`） |
+| **安全策略 (`policies`)** | 创建策略草稿、新建不可变版本、查看版本配置与差异对比、发布门禁（首次可直接发布，后续新版本须完成带标签回归评测且全部通过方可发布，历史已发布版本可回滚）；支持风险阈值、PII 动作（`block`/`mask`/`audit`）、超时、失败处置、流式窗口、争议内容开关与附加拦截词 | `/api/admin/policies/*`（`admin.py`、`service.py`） |
+| **API 资产 (`endpoints`)** | 注册外部 OpenAI 兼容模型端点（SSRF 地址校验、DNS 固定、内网白名单校验、Fernet 凭证加密存储）、端点连接测试、供后台评测任务拉取目标模型回复 | `/api/admin/endpoints/*`（`admin.py`、`network.py`） |
+| **评测任务 (`evaluations`)** | 创建评测任务（直接文本审核回归 / 外部 API 回复评测 / 候选策略版本门禁评测）、幂等键防重、单协调器微批异步执行、任务取消（`cancel`）与中断/失败恢复（`resume`）、查看评测详情 | `/api/admin/evaluations/*`（`admin.py`、`tasks.py`） |
+| **风险事件 (`incidents`)** | 阻断或待复核请求自动生成风险事件、查看关联检测证据与复核时间线、指派负责人并追加复核状态（`investigating` / `resolved` / `false_positive` / `open`） | `/api/admin/incidents/*`（`admin.py`、`service.py`） |
+| **题库管理 (`qbank`)** | 一键导入原始精选库（142 条）与完整库（1607 条）、自定义 JSON 批量导入/新增题目、导出题库 JSON；多维筛选与分页；题目编辑（乐观锁 `expected_revision` 防并发冲突）、版本历史查看与一键恢复、归档与恢复；选中题目或全库发起文本回归 / 批量生成对比评测 | `/api/admin/workbench/banks/*`、`/cases/*`（`workbench.py`） |
+| **提示词调测 (`tuning`)** | 四种行业/场景预设载入、恢复默认草稿、原版测试样例填入、ChatML Prompt 编译预览、Baseline vs Candidate 同输入真实 GPU A/B 对比、保存为策略新版本草稿 | `/api/admin/workbench/presets`、`/prompt-preview`、`/ab-test`（`workbench.py`） |
+| **检测与攻防 (`inspector`)** | 单轮/多轮文本审核实验、Stream 模型离线 Token 染色与截断位点诊断、裸模型 vs 护栏生成同屏对比、反混淆与脱敏工具、持久化实验记录查询 | `/api/admin/workbench/token-scan`、`/compare-generation`、`/deobfuscate`、`/runs`（`workbench.py`） |
+| **评测报告 (`reports`)** | 实时凭证审计对账汇总、按审核对象/来源题库/TC260 子类/攻击方法分层统计、逐题结果筛选与证据查看、两次评测任务 Baseline vs Candidate 对比、导出 JSON / CSV / Markdown、打印/保存 PDF、查看旧版只读历史报告 | `/api/admin/workbench/reports/*`、`/audit/summary`、`/history/benchmark`（`workbench.py`） |
+| **API 在线调试与开发者中心** | 12 个 `/v1/*` 数据面接口在线调试、可视化参数与 Raw JSON 切换、OpenAPI 契约查看、SSE 流式响应实时读取与取消、5 语言（Python/cURL/Node/Go/Java）代码生成与复制、会话保护的 `/docs` 与 `/openapi.json` | `app/console/workbench.js`、`app/enterprise/data_api.py` |
+| **系统管理 (`settings`)** | 实时 GPU/显存/三模型状态、推理队列占用、数据库状态；告警 Webhook 新增（HMAC-SHA256 签名密钥单次展示）、停用、Outbox 投递记录与自动重试（最多 5 次）；项目操作审计日志；`/health/live` 与 `/health/ready` 探针 | `/api/admin/system`、`/webhooks/*`、`/operations`、`/health/*`（`admin.py`、`tasks.py`） |
+
+---
+
+## 二、尚未开发完成并在前端置灰的功能清单（🚧 已置灰 `待开发`）
+
+以下功能尚未开发完成（或仅有部分底层预留而未完成端到端闭环），已在控制台对应位置**置灰显示（`disabled` + `待开发` 徽标与悬浮说明）**，防止误导操作：
+
+| 所属模块 / 页面 | 未开发完成功能 | 当前后端与前端状态 | 控制台置灰位置 | 对应 Backlog 编号 |
+| --- | --- | --- | --- | --- |
+| **全局侧边栏 / 多模态** | **多模态内容审核（图片/OCR、音频/ASR、视频抽帧、PDF/Office 文档）** | 后端 `/api/admin/system` 标记 `image/audio/video/document: todo`；`/v1/guard/detect` 对非 `text` 请求直接返回 `422` | 左侧导航栏“规划中（待开发）”、系统管理“模块与多模态能力状态”面板、开发者中心、检测与攻防实验室 | `M01`～`M06` |
+| **全局侧边栏 / 可观测性** | **Prometheus / OpenTelemetry 指标暴露与分阶段耗时** | 尚未提供 `/metrics` 接口；`timings_ms` 仅含 `total` 与 `model_reported`，未拆分 `queue` 与 `rules` 耗时 | 左侧导航栏“Prometheus 监控（待开发）” | `P1 / O01` |
+| **全局侧边栏 / 身份治理** | **企业 SSO / OIDC 单点登录与组织同步** | 仅支持本地数据库账号密码认证，未实现 OIDC 登录与企业组织权限映射 | 左侧导航栏“SSO 与组织治理（待开发）”、系统管理顶部“SSO / OIDC（待开发）”按钮 | `P2 / S03` |
+| **安全策略 (`policies`)** | **策略按比例灰度发布与异常自动回滚** | 仅支持全量发布切换与手动回滚，未实现流量百分比灰度与指标触发自动回滚 | 策略卡片底部操作栏“灰度发布（待开发）”置灰按钮 | `P1 / P01` |
+| **安全策略 (`policies`)** | **结构化自动放行白名单覆盖规则** | 旧版自定义允许词为空实现（`pass`）已移除；新结构化白名单规则尚未开发 | 安全策略页顶部“自动白名单规则（待开发）”置灰按钮 | `R10` |
+| **API 资产 (`endpoints`)** | **在线业务 Chat 自动路由转发至外部上游 API 及重试** | 已登记的 API 端点仅用于连接测试与后台评测任务，`/v1/chat/completions` 仅调用本地模型，未接入上游业务代理转发 | API 资产页顶部“业务网关上游路由（待开发）”及端点列表操作列“设为 Chat 上游（待开发）”置灰按钮 | `R09` |
+| **API 资产 (`endpoints`)** | **API 资产端点编辑与启停切换** | 数据库 `model_endpoints` 含 `enabled` 字段，但未开发修改 URL/模型/凭证及切换启停的后端接口与弹窗 | API 资产列表操作列“编辑（待开发）”、“停用（待开发）”置灰按钮 | `P1 / U02、E01` |
+| **评测任务 (`evaluations`)** | **Cron 定时周期自动评测** | 仅支持手动提交评测任务，未实现定时调度器与独立周期预算 | 评测任务页顶部“定时周期评测（待开发）”置灰按钮 | `P1 / E02` |
+| **评测任务 / 题库管理** | **独立盲测集 (Holdout) 隔离与多人协同标注流转** | 目前仅支持 `curated` / `full` / `custom` 三类题库及单人 JSON 编辑，未实现 Holdout 盲测权限隔离与多人标注审核工作流 | 评测任务页“独立盲测集 Holdout（待开发）”按钮、题库管理页“多人协同标注（待开发）”按钮及题库下拉框置灰项 | `P1 / E03`、`R11b`、`Q06` |
+| **检测与攻防 (`inspector`)** | **在线生成流式护栏接入 Stream 模型实时逐 Token 熔断** | 在线 `/v1/chat/completions` 使用 `Gen` 模型按累积字符窗口审核；`Stream` 模型目前仅用于离线完整文本 Token 诊断回放 | 检测与攻防页“实验类型”下拉框中“在线生成 Stream 实时逐 Token 熔断（待开发 D05）”置灰选项 | `P1 / D05` |
+| **风险事件 (`incidents`)** | **风险事件超时自动升级与 SLA 规则** | 支持生成事件、指派负责人与人工追加复核，尚未实现超时自动升级规则 | 风险事件页顶部“自动升级规则（待开发）”置灰按钮 | `P1 / A02` |
+| **开发者中心 (`developers`)** | **独立封装的官方多语言 SDK 发布包** | 已提供 5 语言标准 HTTP/SSE 调用代码生成，尚未发布独立封装的 pip/npm/go/maven SDK 包 | 开发者中心顶部“官方 SDK 包下载（待开发）”置灰按钮 | `P1 / C01` |
+| **系统管理 (`settings`)** | **成员账户列表展示与启停前端管理** | 后端已实现 `GET /api/admin/users` 与 `PUT /api/admin/users/{id}/enabled`，但前端尚未完成成员列表管理与启停界面 | 系统管理顶部“账户启停管理（待开发）”置灰按钮 | `P1 / U02` |
+| **系统管理 (`settings`)** | **主密钥 (`PLATFORM_SECRET`) 在线轮换重加密工具** | 加密数据依赖 `PLATFORM_SECRET`，尚未提供在线解密并重加密历史数据的迁移工具 | 系统管理顶部“主密钥轮换（待开发）”置灰按钮 | `P0 / O03` |
+| **系统管理 (`settings`)** | **Webhook 通知模板配置、手动连通性测试与失败投递人工重投** | 支持新增/停用 Webhook 及后台最多 5 次自动重试，未实现报文模板定制、一键测试发送与人工重投 | 系统管理“告警 Webhook”及“最近投递”面板中的“通知模板配置”、“测试发送”、“人工重投”置灰按钮 | `P1 / A02` |
+| **系统管理 / 架构扩展** | **多实例分布式任务租约与 Redis 共享限流** | 当前固定为单进程协调器 (`single-coordinator`) 与数据库原子计数，不支持多 worker 并发或多副本水平扩展 | 系统管理“模块与多模态能力状态”面板置灰行 | `P2 / O02` |
+
+---
+
+## 三、已交付工作项映射（历史基线）
 
 | Todo | 当前交付 | 主要代码 |
 | --- | --- | --- |

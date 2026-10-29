@@ -107,6 +107,18 @@ class PolicyCreate(Named):
 class Publish(StrictModel):
     version: int = Field(ge=1)
     expected_current: int = Field(ge=0)
+    skip_evaluation: bool = False
+
+
+class V1PolicyCreate(Named):
+    config: PolicyConfig = Field(default_factory=PolicyConfig)
+    publish_immediately: bool = True
+    bind_to_application: bool = False
+
+
+class V1PolicyPublish(StrictModel):
+    version: int = Field(ge=1)
+    bind_to_application: bool = False
 
 
 class ApplicationCreate(Named):
@@ -114,35 +126,92 @@ class ApplicationCreate(Named):
     policy_id: str
 
 
+KeyScope = Literal["detect", "chat", "audit:read", "policy:manage"]
+
+
 class KeyCreate(Named):
     expires_days: int = Field(default=90, ge=1, le=365)
     rpm: int = Field(default=60, ge=1, le=10000)
-    scopes: list[Literal["detect", "chat", "audit:read"]] = Field(default_factory=lambda: ["detect"])
+    scopes: list[KeyScope] = Field(
+        default_factory=lambda: ["detect", "chat", "audit:read", "policy:manage"])
+
+
+class QuickKeyCreate(KeyCreate):
+    project_id: str | None = None
+    application_id: str | None = None
+    environment: Literal["production", "sandbox"] = "sandbox"
 
 
 class Message(StrictModel):
     role: Literal["system", "user", "assistant", "tool"]
-    content: str = Field(min_length=1, max_length=16000)
+    content: str = Field(min_length=1, max_length=500000)
+
+
+def _window_truncate(text: str | None, max_chars: int = 12000, head_chars: int = 4000, tail_chars: int = 8000) -> str | None:
+    if text is None or len(text) <= max_chars:
+        return text
+    return f"{text[:head_chars]}\n...[中间内容已窗口截断]...\n{text[-tail_chars:]}"
 
 
 class Detect(StrictModel):
-    prompt: str = Field(default="", max_length=16000)
-    response: str | None = Field(default=None, max_length=32000)
-    messages: list[Message] = Field(default_factory=list, max_length=50)
+    prompt: str = Field(default="", max_length=500000)
+    text: str = Field(default="", max_length=500000)
+    response: str | None = Field(default=None, max_length=500000)
+    messages: list[Message] = Field(default_factory=list, max_length=200)
     content_type: Literal["text"] = "text"
     include_stream_tokens: bool = False
+    # llmguard / external guardrail identity & routing fields
+    role: str | None = Field(default=None, max_length=64)
+    scope: str | None = Field(default=None, max_length=64)
+    user_id: str | None = Field(default=None, max_length=256)
+    caller: str | None = Field(default=None, max_length=256)
+    caller_id: str | None = Field(default=None, max_length=256)
+    team: str | None = Field(default=None, max_length=256)
+    session_id: str | None = Field(default=None, max_length=256)
+    trace_id: str | None = Field(default=None, max_length=256)
+    request_id: str | None = Field(default=None, max_length=256)
+    model: str | None = Field(default=None, max_length=256)
 
     @model_validator(mode="after")
     def meaningful(self):
-        if not self.prompt and not self.messages:
+        if not self.prompt and self.text:
+            self.prompt = self.text
+        if not self.prompt and not self.messages and not (self.response and self.response.strip()):
             raise ValueError("prompt 或 messages 至少提供一项")
-        if sum(len(m.content) for m in self.messages) + len(self.prompt) + len(self.response or "") > 48000:
-            raise ValueError("总内容不能超过 48000 字符")
+        if sum(len(m.content) for m in self.messages) + len(self.prompt) + len(self.response or "") > 1000000:
+            raise ValueError("总内容不能超过 1000000 字符")
         return self
 
     def context(self):
         context = "\n".join(f"{m.role}: {m.content}" for m in self.messages)
         return "\n".join(x for x in (context, self.prompt) if x)
+
+    def effective_pair(self) -> tuple[str, str | None]:
+        role_norm = (self.role or "").strip().lower()
+        scope_norm = (self.scope or "").strip().lower()
+        is_output_scope = role_norm == "assistant" or scope_norm in ("output", "output_blocking", "output_streaming", "post_call")
+        if self.response is None and is_output_scope and self.prompt:
+            msg_ctx = "\n".join(f"{m.role}: {m.content}" for m in self.messages)
+            return (msg_ctx or "审核助手回复", self.prompt)
+        return (self.context() or "审核助手回复", self.response)
+
+    def caller_metadata(self) -> dict | None:
+        meta = {
+            k: v for k, v in (
+                ("role", self.role),
+                ("scope", self.scope),
+                ("user_id", self.user_id),
+                ("caller", self.caller),
+                ("caller_id", self.caller_id),
+                ("team", self.team),
+                ("session_id", self.session_id),
+                ("trace_id", self.trace_id),
+                ("request_id", self.request_id),
+                ("model", self.model),
+            )
+            if v is not None and v != ""
+        }
+        return meta or None
 
 
 class InputRequest(StrictModel):
@@ -236,6 +305,9 @@ class DetectionResult(BaseModel):
     decision: Literal["allow", "block", "mask", "review"]
     action: Literal["allow", "block", "mask", "review"]
     is_safe: bool
+    safety: Literal["Safe", "Unsafe"] = "Safe"
+    categories: list[str] = Field(default_factory=list)
+    result: str = ""
     risk_level: str
     risk_score: float | None
     score_kind: Literal["policy_score"]
@@ -248,6 +320,7 @@ class DetectionResult(BaseModel):
     matched_rules: list[str] = Field(default_factory=list)
     sanitized_content: str | None = None
     stream_diagnostic: dict | None = None
+    caller_context: dict | None = None
 
 
 class LegacyResult(DetectionResult):

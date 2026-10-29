@@ -27,14 +27,16 @@ def source(application):
 
 
 async def detect(request, application, key, body, version=None):
+    prompt, response = body.effective_pair()
     return await request.app.state.service.detect(
-        application, key["id"], body.context(), body.response, request.state.request_id,
+        application, key["id"], prompt, response, request.state.request_id,
         source=source(application), endpoint=request.url.path, version=version,
-        include_stream_tokens=body.include_stream_tokens)
+        include_stream_tokens=body.include_stream_tokens,
+        scope=body.scope, caller_context=body.caller_metadata())
 
 
 @router.post("/v1/guard/detect", response_model=s.DetectionResult, response_model_exclude_none=True)
-@router.post("/v1/guard", include_in_schema=False)
+@router.post("/v1/guard", response_model=s.DetectionResult, response_model_exclude_none=True, include_in_schema=False)
 async def guard_detect(body: s.Detect, request: Request):
     application, key = api_identity(request)
     return await detect(request, application, key, body)
@@ -154,9 +156,213 @@ async def catalog(request: Request):
     return {"version": "3.0.0", "contract": "/openapi.json",
             "endpoints": {path: spec for path, spec in schema["paths"].items() if path.startswith("/v1/")},
             "schemas": schema["components"]["schemas"],
-            "capabilities": {"text": True, "incremental_guarded_chat": True,
+            "capabilities": {"text": True, "incremental_guarded_chat": True, "policy_management_api": True,
                              "image": False, "audio": False, "video": False, "document": False},
             "compatibility": "Text chat streaming subset; moderation categories are platform-specific"}
+
+
+def _policy_api_identity(request: Request, write: bool = False):
+    if write:
+        return api_identity(request, scope="policy:manage")
+    raw = request.headers.get("X-API-Key", "")
+    authorization = request.headers.get("Authorization", "")
+    if authorization.lower().startswith("bearer "):
+        raw = authorization[7:].strip()
+    db = request.app.state.db
+    from .security import digest
+    row = db.one(select(t.keys).where(t.keys.c.token_hash == digest(raw))) if raw else None
+    scope = "policy:manage" if (row and "policy:manage" in (row["scopes"] or [])) else "detect"
+    return api_identity(request, scope=scope)
+
+
+@router.get("/v1/policies")
+async def v1_list_policies(request: Request):
+    application, _ = _policy_api_identity(request, write=False)
+    db = request.app.state.db
+    items = db.all(select(t.policies).where(
+        t.policies.c.project_id == application["project_id"]).order_by(t.policies.c.created_at.desc()))
+    for policy in items:
+        policy["versions"] = db.all(select(t.versions).where(
+            t.versions.c.policy_id == policy["id"]).order_by(t.versions.c.version.desc()))
+    return {
+        "project_id": application["project_id"],
+        "application_id": application["id"],
+        "current_policy_id": application["policy_id"],
+        "items": items,
+    }
+
+
+@router.get("/v1/policies/current")
+async def v1_current_policy(request: Request):
+    application, _ = _policy_api_identity(request, write=False)
+    db = request.app.state.db
+    policy = db.one(select(t.policies).where(t.policies.c.id == application["policy_id"]))
+    version = request.app.state.service.policy(application)
+    return {
+        "project_id": application["project_id"],
+        "application_id": application["id"],
+        "application_name": application["name"],
+        "environment": application["environment"],
+        "policy_id": policy["id"],
+        "policy_name": policy["name"],
+        "version": version["version"],
+        "published_version": policy["published_version"],
+        "config": version["config"],
+    }
+
+
+@router.post("/v1/policies", status_code=201)
+async def v1_create_policy(body: s.V1PolicyCreate, request: Request):
+    application, key = _policy_api_identity(request, write=True)
+    db = request.app.state.db
+    project_id = application["project_id"]
+    policy_id = t.ident()
+    actor_id = f"apikey:{key['id']}"
+    pub_ver = 1 if body.publish_immediately else 0
+    cfg_dump = body.config.model_dump()
+    with db.engine.begin() as conn:
+        conn.execute(t.policies.insert().values(
+            id=policy_id, created_at=time.time(), project_id=project_id,
+            name=body.name, published_version=pub_ver))
+        conn.execute(t.versions.insert().values(
+            id=t.ident(), created_at=time.time(), policy_id=policy_id,
+            version=1, config=cfg_dump, author_id=actor_id))
+        if body.publish_immediately:
+            conn.execute(t.operations.insert().values(
+                id=t.ident(), created_at=time.time(), actor_id=actor_id,
+                project_id=project_id, action="policy.publish", target_id=policy_id,
+                detail={"from": 0, "to": 1, "via": "v1_api"}))
+        if body.bind_to_application:
+            if not body.publish_immediately:
+                fail(422, "policy_unpublished", "绑定到当前应用时需同时启用 publish_immediately")
+            conn.execute(t.apps.update().where(t.apps.c.id == application["id"]).values(policy_id=policy_id))
+    db.operation(actor_id, "policy.create", policy_id, project_id, via="v1_api")
+    return {
+        "id": policy_id,
+        "name": body.name,
+        "project_id": project_id,
+        "version": 1,
+        "published_version": pub_ver,
+        "bound_to_application": body.bind_to_application,
+        "application_id": application["id"],
+        "config": cfg_dump,
+    }
+
+
+@router.put("/v1/policies/current")
+async def v1_update_current_policy(request: Request):
+    from fastapi.exceptions import RequestValidationError
+    from pydantic import ValidationError
+    from sqlalchemy import func
+    application, key = _policy_api_identity(request, write=True)
+    db = request.app.state.db
+    try:
+        payload = await request.json()
+    except Exception:
+        fail(422, "invalid_json", "请求体须为合法 JSON 对象")
+    if not isinstance(payload, dict):
+        fail(422, "invalid_payload", "请求体须为策略配置字典")
+    raw_updates = payload.get("config") if isinstance(payload.get("config"), dict) else payload
+    if not isinstance(raw_updates, dict):
+        fail(422, "invalid_payload", "请求体须为策略配置字典")
+    current_version = request.app.state.service.policy(application)
+    merged = {**current_version["config"], **raw_updates}
+    try:
+        validated_config = s.PolicyConfig(**merged).model_dump()
+    except ValidationError as exc:
+        raise RequestValidationError(exc.errors()) from exc
+    policy_id = application["policy_id"]
+    actor_id = f"apikey:{key['id']}"
+    with db.engine.begin() as conn:
+        policy = t.row(conn.execute(select(t.policies).where(t.policies.c.id == policy_id).with_for_update()))
+        latest = conn.execute(select(func.max(t.versions.c.version)).where(t.versions.c.policy_id == policy_id)).scalar() or 0
+        new_ver = latest + 1
+        conn.execute(t.versions.insert().values(
+            id=t.ident(), created_at=time.time(), policy_id=policy_id,
+            version=new_ver, config=validated_config, author_id=actor_id))
+        conn.execute(t.policies.update().where(t.policies.c.id == policy_id).values(published_version=new_ver))
+        conn.execute(t.operations.insert().values(
+            id=t.ident(), created_at=time.time(), actor_id=actor_id,
+            project_id=application["project_id"], action="policy.publish", target_id=policy_id,
+            detail={"from": policy["published_version"], "to": new_ver, "via": "v1_api_current_update"}))
+    return {
+        "policy_id": policy_id,
+        "policy_name": policy["name"],
+        "version": new_ver,
+        "published_version": new_ver,
+        "application_id": application["id"],
+        "config": validated_config,
+    }
+
+
+@router.post("/v1/policies/{policy_id}/versions", status_code=201)
+async def v1_create_policy_version(policy_id: str, body: s.PolicyConfig, request: Request):
+    from sqlalchemy import func
+    application, key = _policy_api_identity(request, write=True)
+    db = request.app.state.db
+    policy = db.one(select(t.policies).where(
+        t.policies.c.id == policy_id, t.policies.c.project_id == application["project_id"]))
+    if not policy:
+        fail(404, "not_found", "策略不存在或不属于当前项目")
+    actor_id = f"apikey:{key['id']}"
+    with db.engine.begin() as conn:
+        conn.execute(select(t.policies).where(t.policies.c.id == policy_id).with_for_update())
+        latest = conn.execute(select(func.max(t.versions.c.version)).where(t.versions.c.policy_id == policy_id)).scalar() or 0
+        item = {"id": t.ident(), "created_at": time.time(), "policy_id": policy_id,
+                "version": latest + 1, "config": body.model_dump(), "author_id": actor_id}
+        conn.execute(t.versions.insert().values(**item))
+    db.operation(actor_id, "policy.draft", policy_id, application["project_id"], version=latest + 1)
+    return item
+
+
+@router.post("/v1/policies/{policy_id}/publish")
+async def v1_publish_policy(policy_id: str, body: s.V1PolicyPublish, request: Request):
+    application, key = _policy_api_identity(request, write=True)
+    db = request.app.state.db
+    policy = db.one(select(t.policies).where(
+        t.policies.c.id == policy_id, t.policies.c.project_id == application["project_id"]))
+    if not policy:
+        fail(404, "not_found", "策略不存在或不属于当前项目")
+    version = db.one(select(t.versions).where(
+        t.versions.c.policy_id == policy_id, t.versions.c.version == body.version))
+    if not version:
+        fail(404, "not_found", "策略版本不存在")
+    actor_id = f"apikey:{key['id']}"
+    with db.engine.begin() as conn:
+        conn.execute(t.policies.update().where(t.policies.c.id == policy_id).values(published_version=body.version))
+        if body.bind_to_application:
+            conn.execute(t.apps.update().where(t.apps.c.id == application["id"]).values(policy_id=policy_id))
+        conn.execute(t.operations.insert().values(
+            id=t.ident(), created_at=time.time(), actor_id=actor_id,
+            project_id=application["project_id"], action="policy.publish", target_id=policy_id,
+            detail={"from": policy["published_version"], "to": body.version, "via": "v1_api"}))
+    return {
+        "policy_id": policy_id,
+        "published_version": body.version,
+        "bound_to_application": body.bind_to_application,
+        "application_id": application["id"],
+        "config": version["config"],
+    }
+
+
+@router.put("/v1/policies/{policy_id}/bind")
+async def v1_bind_policy(policy_id: str, request: Request):
+    application, key = _policy_api_identity(request, write=True)
+    db = request.app.state.db
+    policy = db.one(select(t.policies).where(
+        t.policies.c.id == policy_id, t.policies.c.project_id == application["project_id"]))
+    if not policy or not policy["published_version"]:
+        fail(422, "policy_unpublished", "目标策略不存在或尚未发布")
+    actor_id = f"apikey:{key['id']}"
+    with db.engine.begin() as conn:
+        conn.execute(t.apps.update().where(t.apps.c.id == application["id"]).values(policy_id=policy_id))
+    db.operation(actor_id, "application.settings", application["id"], application["project_id"], policy_id=policy_id)
+    return {
+        "ok": True,
+        "application_id": application["id"],
+        "policy_id": policy_id,
+        "published_version": policy["published_version"],
+    }
 
 
 @router.get("/v1/audit/logs")

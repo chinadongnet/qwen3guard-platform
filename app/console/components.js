@@ -1,4 +1,4 @@
-import {esc,date,number} from "./api.js?v=3.2.4";
+import {esc,date,number} from "./api.js?v=3.2.5";
 export const button=(label,action,id="",kind="")=>`<button type="button" class="${esc(kind)}" data-action="${esc(action)}" data-id="${esc(id)}">${esc(label)}</button>`;
 export const disabledButton=(label,reason="该功能尚未开发完成",kind="small")=>`<button type="button" class="disabled-feature ${esc(kind)}" disabled title="${esc(reason)}" aria-disabled="true">${esc(label)} <span class="todo-pill">待开发</span></button>`;
 export const badge=(value)=>{

@@ -7,7 +7,118 @@ from sqlalchemy import select
 
 from . import db as t
 from .inference import InferenceTimeout, QueueFull
+from .schemas import _window_truncate
 from .security import fail, pii_findings, redact
+
+# Canonical TC260 subcategory mappings aligned with scripts/build_tc260_dataset.py (TC260_TAXONOMY)
+_TC260_SUBCODE_TO_LLMG: dict[str, str] = {
+    "A.1.1": "Politics",        # 煽动颠覆国家政权、推翻社会主义制度
+    "A.1.2": "Politics",        # 危害国家安全和利益、损害国家形象
+    "A.1.3": "Politics",        # 煽动分裂国家、破坏国家统一和社会稳定
+    "A.1.4": "Terror",          # 宣扬恐怖主义、极端主义
+    "A.1.5": "Discrimination",  # 宣扬民族仇恨
+    "A.1.7": "Illegal",         # 传播虚假有害信息
+    "A.1.8": "Illegal",         # 其他法律、行政法规禁止的内容
+    "A.2.1": "Discrimination",  # 民族歧视内容
+    "A.2.2": "Discrimination",  # 信仰歧视内容
+    "A.2.3": "Discrimination",  # 国别歧视内容
+    "A.2.4": "Discrimination",  # 地域歧视内容
+    "A.2.5": "Discrimination",  # 性别歧视内容
+    "A.2.6": "Discrimination",  # 年龄歧视内容
+    "A.2.7": "Discrimination",  # 职业歧视内容
+    "A.2.8": "Discrimination",  # 健康歧视内容
+    "A.2.9": "Discrimination",  # 其他方面歧视内容
+    "A.3.1": "Illegal",         # 侵犯他人知识产权
+    "A.3.2": "Illegal",         # 违反商业道德
+    "A.3.3": "Illegal",         # 泄露他人商业秘密
+    "A.3.4": "Illegal",         # 实施垄断和不正当竞争行为
+    "A.3.5": "Illegal",         # 其他商业违法违规行为
+    "A.4.1": "Self-Harm",       # 危害他人身心健康
+    "A.4.2": "Illegal",         # 侵害他人肖像权
+    "A.4.3": "Illegal",         # 侵害他人名誉权
+    "A.4.4": "Illegal",         # 侵害他人荣誉权
+    "A.4.5": "Privacy",         # 侵害他人隐私权
+    "A.4.6": "Privacy",         # 侵害他人个人信息权益
+    "A.4.7": "Illegal",         # 侵犯他人其他合法权益
+    "A.5.1": "Illegal",         # 内容不准确（医疗/金融/自动控制）
+    "A.5.2": "Illegal",         # 内容不可靠（心理咨询/关键信息基础设施）
+}
+
+
+def _build_llmguard_compat(decision: str, error, result: dict, findings: list, matched_rules: list[str]) -> tuple[str, list[str], str]:
+    is_unsafe = (decision in ("block", "review")) or bool(error)
+    safety = "Unsafe" if is_unsafe else "Safe"
+    qwen_gen = result.get("qwen_guard_gen") or {}
+    refusal = qwen_gen.get("refusal")
+    if not is_unsafe:
+        lines = ["Safety: Safe", "Categories: None"]
+        if refusal in ("Yes", "No"):
+            lines.append(f"Refusal: {refusal}")
+        return safety, [], "\n".join(lines)
+
+    raw_cats = [c for c in (qwen_gen.get("categories") or []) if c and str(c).lower() != "none"]
+    tc260 = result.get("tc260") or {}
+    major_code = str(tc260.get("major_code") or "")
+    sub_code = str(tc260.get("sub_code") or "")
+    sub_name = str(tc260.get("sub_name") or "")
+    raw_and_rules = " ".join([*raw_cats, *(matched_rules or [])]).lower()
+
+    canonical: list[str] = []
+    def add_cat(c: str):
+        if c and c not in canonical:
+            canonical.append(c)
+
+    if any(k in raw_and_rules for k in ("prompt_injection", "injection", "指令注入", "提示词注入", "间接注入")):
+        add_cat("Prompt_Injection")
+    if major_code == "JAILBREAK" or sub_code.startswith("JB") or any(
+        k in raw_and_rules for k in ("jailbreak", "jb.", "越狱", "dan", "角色扮演绕过", "指令覆盖")
+    ):
+        add_cat("Jailbreak")
+    if findings or major_code == "PII" or any(k in raw_and_rules for k in ("pii", "privacy", "个人信息", "隐私")):
+        add_cat("Privacy")
+    if any(k in raw_and_rules for k in ("terror", "恐怖", "极端主义")):
+        add_cat("Terror")
+    if any(k in raw_and_rules for k in ("violent", "violence", "暴力", "杀害", "炸药", "爆炸", "武器", "枪支")):
+        add_cat("Violent")
+    if any(k in raw_and_rules for k in ("sexual", "porn", "色情", "淫秽")):
+        add_cat("Sexual")
+    if any(k in raw_and_rules for k in ("drug", "毒品", "制毒", "吸毒", "冰毒", "海洛因")):
+        add_cat("Drug")
+    if any(k in raw_and_rules for k in ("gambling", "赌博", "博彩")):
+        add_cat("Gambling")
+    if any(k in raw_and_rules for k in ("hate", "discrimination", "歧视", "仇恨", "侮辱", "诽谤")):
+        add_cat("Discrimination")
+    if any(k in raw_and_rules for k in ("suicide", "self-harm", "selfharm", "自杀", "自残")):
+        add_cat("Self-Harm")
+    if any(k in raw_and_rules for k in ("politic", "政治", "颠覆", "分裂", "国家安全")):
+        add_cat("Politics")
+
+    # Map TC260 subcategory/major_code strictly according to TC260_TAXONOMY
+    if sub_code == "A.1.6":
+        if not any(c in canonical for c in ("Violent", "Sexual")):
+            add_cat("Violent")
+    elif sub_code in _TC260_SUBCODE_TO_LLMG:
+        add_cat(_TC260_SUBCODE_TO_LLMG[sub_code])
+    elif major_code == "A.2":
+        add_cat("Discrimination")
+    elif major_code in ("A.3", "A.4", "A.5"):
+        add_cat("Illegal")
+
+    if not canonical:
+        add_cat("Illegal")
+
+    for rc in raw_cats:
+        add_cat(str(rc))
+    if sub_code and sub_code not in ("BENIGN", "SAFE", "NONE"):
+        add_cat(f"{sub_code} {sub_name}".strip())
+    for rule in matched_rules or []:
+        if str(rule).startswith("custom_keyword:"):
+            add_cat(str(rule))
+
+    lines = [f"Safety: {safety}", f"Categories: {', '.join(canonical)}"]
+    if refusal in ("Yes", "No"):
+        lines.append(f"Refusal: {refusal}")
+    return safety, canonical, "\n".join(lines)
 
 
 class DetectionService:
@@ -25,7 +136,7 @@ class DetectionService:
 
     async def detect(self, application, key_id, prompt, response, request_id,
                      source="production", endpoint="/v1/guard/detect", version=None, include_stream_tokens=False,
-                     _model_result=None, _inference_ms=0):
+                     _model_result=None, _inference_ms=0, scope=None, caller_context=None):
         if _model_result is not None and source != "evaluation":
             raise ValueError("Prepared inference is only supported for internal evaluation")
         version = version or self.policy(application)
@@ -34,21 +145,56 @@ class DetectionService:
         status, error = "completed", None
         result = {}
         stream = None
+        model_id = "Qwen3Guard-Gen-0.6B"
         try:
             model_prompt, model_response = prompt, response
             if config.get("pii_action") in ("mask", "audit"):
                 model_prompt = redact(prompt)
                 model_response = redact(response) if response is not None else None
-            result = _model_result if _model_result is not None else await self.pool.run(
-                lambda: self.models.detect(model_prompt, model_response, config),
-                timeout=config.get("timeout_seconds", 30))
+            # Apply window truncation only to the model inference copy; deterministic
+            # policy checks (PII spans, custom keywords, sanitization) use the full input.
+            model_prompt = _window_truncate(model_prompt) or ""
+            model_response = _window_truncate(model_response)
+            use_stream_fastpath = (
+                _model_result is None
+                and (scope or "").strip().lower() == "output_streaming"
+                and hasattr(self.models, "scan")
+            )
+            if use_stream_fastpath:
+                stream = await self.pool.run(
+                    lambda: self.models.scan(model_prompt, model_response, config),
+                    timeout=config.get("timeout_seconds", 30))
+                if not isinstance(stream.get("is_safe"), bool):
+                    raise RuntimeError("invalid stream decision")
+                overall_risk = stream.get("overall_risk_level", "Unsafe" if not stream["is_safe"] else "Safe")
+                result = {
+                    "is_safe": stream["is_safe"],
+                    "risk_level": overall_risk,
+                    "risk_score": stream.get("risk_score"),
+                    "latency_ms": stream.get("latency_ms"),
+                    "tc260": stream.get("tc260"),
+                    "qwen_guard_gen": {
+                        "safety": overall_risk,
+                        "categories": stream.get("detected_categories") or [],
+                        "refusal": None,
+                    },
+                    "security_shield": {
+                        "matched_rules": ["stream_circuit_breaker"] if stream.get("circuit_breaker_triggered") else [],
+                    },
+                }
+                model_id = "Qwen3Guard-Stream-0.6B"
+            else:
+                result = _model_result if _model_result is not None else await self.pool.run(
+                    lambda: self.models.detect(model_prompt, model_response, config),
+                    timeout=config.get("timeout_seconds", 30))
             if not isinstance(result.get("is_safe"), bool):
                 raise RuntimeError("invalid model decision")
             decision = "allow" if result["is_safe"] else "block"
             risk = result.get("risk_level", "unknown").lower()
             if include_stream_tokens:
-                stream = await self.pool.run(lambda: self.models.scan(
-                    model_prompt, model_response, config), timeout=config.get("timeout_seconds", 30))
+                if stream is None:
+                    stream = await self.pool.run(lambda: self.models.scan(
+                        model_prompt, model_response, config), timeout=config.get("timeout_seconds", 30))
                 if not isinstance(stream.get("is_safe"), bool):
                     raise RuntimeError("invalid stream decision")
                 if not stream["is_safe"]:
@@ -69,24 +215,38 @@ class DetectionService:
                 decision, risk = "block", "unsafe"
             elif config.get("pii_action") == "mask" and decision == "allow":
                 decision = "mask"
+        matched_rules = list((result.get("security_shield") or {}).get("matched_rules", []))
+        target_text = f"{prompt or ''}\n{response or ''}"
+        for kw in config.get("custom_block_keywords") or []:
+            if kw and kw.lower() in target_text.lower():
+                if not error:
+                    decision, risk = "block", "unsafe"
+                rule_tag = f"custom_keyword:{kw}"
+                if rule_tag not in matched_rules:
+                    matched_rules.append(rule_tag)
+        safety_label, compat_categories, compat_result_str = _build_llmguard_compat(
+            decision, error, result, findings, matched_rules)
         elapsed = round((time.perf_counter() - started) * 1000 + _inference_ms, 2)
         audit_id = t.ident()
         payload = {
             "request_id": request_id, "audit_id": audit_id, "execution_status": status,
             "decision": decision, "action": decision, "is_safe": decision == "allow" and not error,
-            "risk_level": risk, "risk_score": result.get("risk_score") if not error else None,
+            "safety": safety_label, "categories": compat_categories, "result": compat_result_str,
+            "risk_level": risk, "risk_score": (max(result.get("risk_score") or 0.0, 0.95) if matched_rules and decision == "block" else result.get("risk_score")) if not error else None,
             "score_kind": "policy_score", "findings": findings,
             "policy": {"id": version["policy_id"], "version": version["version"]},
-            "model": {"id": "Qwen3Guard-Gen-0.6B", "revision": "unknown"},
+            "model": {"id": model_id, "revision": "unknown"},
             "model_assessment": {k: v for k, v in (result.get("qwen_guard_gen") or {}).items()
                                  if k in ("safety", "categories", "refusal")},
             "timings_ms": {"total": elapsed, "model_reported": result.get("latency_ms")},
             "tc260": result.get("tc260"),
-            "matched_rules": (result.get("security_shield") or {}).get("matched_rules", []),
+            "matched_rules": matched_rules,
         }
+        if caller_context:
+            payload["caller_context"] = caller_context
         if decision == "mask":
             payload["sanitized_content"] = redact(response if response is not None else prompt)
-        if stream is not None:
+        if stream is not None and include_stream_tokens:
             payload["stream_diagnostic"] = {**stream, "mode": "offline_token_diagnostic"}
         if error:
             payload["error"] = {"code": error[1], "message": error[2], "retryable": error[0] >= 500}

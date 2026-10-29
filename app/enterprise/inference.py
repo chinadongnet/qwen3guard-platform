@@ -94,6 +94,7 @@ class LocalModels:
     def scan(self, prompt, response, config):
         from app.config import RuntimeConfig
         cfg = RuntimeConfig(**{k: v for k, v in config.items() if k in RuntimeConfig.model_fields})
+        cfg.enable_pii_shield = False
         return self.manager.detect_stream_tokens(prompt, response, cfg)
 
     def raw_generation(self, prompt, config):

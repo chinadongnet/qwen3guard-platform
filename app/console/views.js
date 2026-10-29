@@ -1,6 +1,6 @@
-import {api,state,scoped,esc,date,number,can} from "./api.js?v=3.2.4";
-import {button,disabledButton,badge,empty,panel,table,metric,heading,detectionTable,json} from "./components.js?v=3.2.4";
-import {renderWorkbench} from "./workbench.js?v=3.2.4";
+import {api,state,scoped,esc,date,number,can} from "./api.js?v=3.2.5";
+import {button,disabledButton,badge,empty,panel,table,metric,heading,detectionTable,json} from "./components.js?v=3.2.5";
+import {renderWorkbench} from "./workbench.js?v=3.2.5";
 
 export const pages=[
   ["overview","运营总览","◈"],["guide","功能与接入指南","✦"],["applications","应用接入","▦"],["detections","检测记录","≡"],
@@ -61,11 +61,14 @@ async function overview(){
 }
 
 async function applications(){
-  const data=await api(scoped("/api/admin/applications"));state.cache.applications=data.items;
-  const action=can("admin","developer")?button("＋ 创建应用","new-application","","primary"):"";
+  const [data,keyData]=await Promise.all([api(scoped("/api/admin/applications")),api(scoped("/api/admin/keys")).catch(()=>({items:[]}))]);
+  state.cache.applications=data.items;state.cache.keys=keyData.items;
+  const action=can("admin","developer")?`${button("＋ 创建 API Key","quick-new-key","","primary")}${button("＋ 创建应用","new-application","")}`:"";
   const rows=data.items.map(item=>`<tr><td><strong>${esc(item.name)}</strong><div class="subline mono">${esc(item.id.slice(0,16))}</div></td><td>${badge(item.environment)}</td><td><code>${esc(item.policy_id.slice(0,12))}</code></td><td>${badge(item.enabled?"可用":"已停用")}</td><td>${date(item.created_at)}</td><td><div class="actions">${can("admin","developer")?button("凭证","keys",item.id,"small"):""}${can("admin")?button("设置","edit-application",item.id,"small")+button(item.enabled?"停用":"启用","toggle-application",item.id,"small"):""}${can("admin","developer","operator")?button("验证接入","test-application",item.id,"small quiet"):""}</div></td></tr>`);
-  return heading("应用接入","为每个业务系统分配独立凭证、环境与安全策略。",action)+
-    `<div class="notice">密钥仅在创建时显示一次。控制台验证使用当前用户权限，验证流量不会计入生产指标。</div>`+
+  const keyRows=keyData.items.map(k=>`<tr><td><strong>${esc(k.name)}</strong><div class="subline mono">${esc(k.prefix)}…</div></td><td>${esc(k.application_name||k.application_id.slice(0,12))}</td><td><code>${esc((k.scopes||[]).join(", "))}</code></td><td>${k.rpm} 条/分钟<div class="subline">至 ${date(k.expires_at)}</div></td><td>${badge(k.revoked?"已撤销":k.expires_at*1000<Date.now()?"已过期":k.enabled?"可用":"已暂停")}</td><td><div class="actions">${!k.revoked?button("额度 / 启停","key-settings",k.id,"small")+button("轮换","rotate-key",k.id,"small")+button("撤销","revoke-key",k.id,"small danger"):""}</div></td></tr>`);
+  return heading("应用接入与 API Key","为每个业务系统分配独立凭证、环境与安全策略；支持一键创建 API Key 直接调用策略配置与内容检测 API。",action)+
+    `<div class="notice">完整密钥（<code>qg_...</code>）仅在创建时显示一次。开启 <code>policy:manage</code> 权限的凭证可同时通过 REST API 配置安全策略（<code>/v1/policies*</code> 或 <code>/api/admin/policies*</code>）并调用检测接口（<code>/v1/guard/*</code>）。</div>`+
+    panel("API Key 凭证列表",keyRows.length?table(["凭证名称 / 前缀","所属应用","权限范围 (Scopes)","额度 / 有效期","状态","操作"],keyRows):empty("尚未创建 API Key","点击右上角「＋ 创建 API Key」即可一键生成凭证。",can("admin","developer")?button("＋ 创建 API Key","quick-new-key","","primary"):""))+
     panel("业务应用",rows.length?table(["应用名称","环境","绑定策略","状态","创建时间","操作"],rows):empty("创建第一个业务应用","先发布安全策略，再创建应用并获取独立 API Key。",action));
 }
 
@@ -162,10 +165,10 @@ function guide(){
 }
 
 function developers(){
-  const sample=`import os\nimport requests\n\nresponse = requests.post(\n    "${location.origin}/v1/guard/detect",\n    headers={"Authorization": f"Bearer {os.environ['QG_API_KEY']}"},\n    json={"prompt": "请帮我整理会议纪要"},\n    timeout=35,\n)\nresponse.raise_for_status()\nresult = response.json()\nprint(result["decision"], result["request_id"])`;
-  return heading("开发者中心","通过应用凭证接入真实审核，按明确的接口契约处理结果。",`${button("功能与接入指南","navigate","guide")}<a href="/docs" target="_blank" rel="noopener"><button>OpenAPI 文档 ↗</button></a>${disabledButton("官方 SDK 包下载","P1/C01 待开发：独立封装的官方多语言 SDK 包与外部系统兼容认证尚未发布","")}`)+
-    `<div class="split">${panel("快速接入",`<div class="panel-body"><div class="numbered"><span>1</span><div><strong>创建应用并绑定策略</strong><p>选择生产或沙盒环境，为业务系统建立独立作用域。</p></div></div><div class="numbered"><span>2</span><div><strong>创建应用凭证</strong><p>按需启用 detect、chat、audit:read。将密钥存入服务端密钥管理器。</p></div></div><div class="numbered"><span>3</span><div><strong>调用并处理结果</strong><p>allow 放行，block 阻断，mask 使用脱敏文本，review 转人工复核。</p></div></div><pre class="code-block">${esc(sample)}</pre></div>`)}
-    ${panel("接口与处理约定",`<div class="panel-body"><div class="check-row"><div><strong>POST /v1/guard/detect</strong><p>文本 / 多轮上下文 / 可选回复审核</p></div>${badge("completed")}</div><div class="check-row"><div><strong>POST /v1/guard/batch</strong><p>最多 50 条；额度按条计，逐项报告失败</p></div>${badge("completed")}</div><div class="check-row"><div><strong>POST /v1/chat/completions</strong><p>真实增量生成；未审核窗口不会释放</p></div>${badge("completed")}</div><div class="check-row"><div><strong>GET /v1/audit/logs</strong><p>仅本应用记录；要求 audit:read</p></div>${badge("completed")}</div><div class="check-row todo-row" title="M01～M05 待开发：多模态接口尚未实现"><div><strong>多模态审核（图片 / 音视频 / 文档）</strong><p>暂未开放；非 text 类型请求返回 422</p></div>${badge("todo")}</div><div class="section-label">错误处理</div><p class="help">401 认证失败 · 403 权限不足 · 422 参数不支持 · 429 额度耗尽 · 503 过载/引擎不可用 · 504 检测超时。</p><p class="help">OpenAI 风格文本 Chat 子集；Moderation 类别为平台自定义策略评分。多模态输入暂未开放。</p></div>`)}</div>`;
+  const sample=`import os\nimport requests\n\nBASE_URL = "${location.origin}"\nHEADERS = {"Authorization": f"Bearer {os.environ['QG_API_KEY']}"}\n\n# 1. 使用 API Key 动态配置当前应用的安全策略（平台级策略 REST API）\npolicy_resp = requests.put(\n    f"{BASE_URL}/v1/policies/current",\n    headers=HEADERS,\n    json={\n        "risk_threshold": 0.45,\n        "pii_action": "mask",\n        "custom_block_keywords": ["内部机密代号"],\n    },\n    timeout=15,\n)\npolicy_resp.raise_for_status()\n\n# 2. 使用同一 API Key 调用实时内容安全检测 API\ndetect_resp = requests.post(\n    f"{BASE_URL}/v1/guard/detect",\n    headers=HEADERS,\n    json={"prompt": "请帮我整理会议纪要，联系人手机 13812345678"},\n    timeout=35,\n)\ndetect_resp.raise_for_status()\nresult = detect_resp.json()\nprint(result["decision"], result.get("sanitized_content"), result["request_id"])`;
+  return heading("开发者中心","通过应用凭证接入真实审核与平台级策略配置 API，按明确的接口契约处理结果。",`${can("admin","developer")?button("＋ 创建 API Key","quick-new-key","","primary"):""}${button("功能与接入指南","navigate","guide")}<a href="/docs" target="_blank" rel="noopener"><button>OpenAPI 文档 ↗</button></a>${disabledButton("官方 SDK 包下载","P1/C01 待开发：独立封装的官方多语言 SDK 包与外部系统兼容认证尚未发布","")}`)+
+    `<div class="split">${panel("快速接入（API Key 同时支持策略配置与检测调用）",`<div class="panel-body"><div class="numbered"><span>1</span><div><strong>登录后一键创建 API Key</strong><p>点击右上角「＋ 创建 API Key」（或调用 <code>POST /api/admin/keys</code>），默认授予 <code>detect,chat,audit:read,policy:manage</code> 全功能权限。</p></div></div><div class="numbered"><span>2</span><div><strong>使用 API Key 配置安全策略</strong><p>通过 <code>GET/PUT /v1/policies/current</code>、<code>POST /v1/policies</code> 或 <code>/api/admin/policies</code> 动态创建与更新 22 项安全策略参数。</p></div></div><div class="numbered"><span>3</span><div><strong>使用 API Key 调用检测与护栏</strong><p>调用 <code>/v1/guard/detect</code>、<code>/v1/guard/stream</code>、<code>/v1/chat/completions</code>：allow 放行，block 阻断，mask 使用脱敏文本。</p></div></div><pre class="code-block">${esc(sample)}</pre></div>`)}
+    ${panel("接口与处理约定",`<div class="panel-body"><div class="check-row"><div><strong>GET / PUT /v1/policies/current · POST /v1/policies</strong><p>使用 API Key 查询、创建、发布与热更新安全策略配置</p></div>${badge("completed")}</div><div class="check-row"><div><strong>POST /v1/guard/detect · /v1/guard/input · /v1/guard/output</strong><p>文本 / 多轮上下文 / 回复审核 / PII 脱敏</p></div>${badge("completed")}</div><div class="check-row"><div><strong>POST /v1/guard/stream · /v1/guard/stream/sse</strong><p>Qwen3Guard-Stream 逐 Token 风险扫描与熔断诊断</p></div>${badge("completed")}</div><div class="check-row"><div><strong>POST /v1/guard/batch · /v1/moderations</strong><p>最多 50 条批量审核；OpenAI Moderations 兼容接口</p></div>${badge("completed")}</div><div class="check-row"><div><strong>POST /v1/chat/completions</strong><p>真实增量生成与流式护栏；未审核窗口不会释放</p></div>${badge("completed")}</div><div class="check-row"><div><strong>GET /v1/audit/logs · /v1/audit/summary</strong><p>本应用检测审计日志与阻断率统计；要求 audit:read</p></div>${badge("completed")}</div><div class="check-row todo-row" title="M01～M05 待开发：多模态接口尚未实现"><div><strong>多模态审核（图片 / 音视频 / 文档）</strong><p>暂未开放；非 text 类型请求返回 422</p></div>${badge("todo")}</div><div class="section-label">错误处理</div><p class="help">401 认证失败 · 403 权限不足 · 422 参数不支持 · 429 额度耗尽 · 503 过载/引擎不可用 · 504 检测超时。</p></div>`)}</div>`;
 }
 
 async function settings(){

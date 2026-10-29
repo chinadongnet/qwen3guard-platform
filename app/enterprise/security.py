@@ -72,23 +72,47 @@ def current_user(request: Request):
         tables.sessions.c.expires_at > time.time())) if token else None
     user = database.one(select(tables.users).where(
         tables.users.c.id == session["user_id"], tables.users.c.enabled.is_(True))) if session else None
-    if not user:
-        fail(401, "authentication_required", "请先登录")
-    if request.method not in ("GET", "HEAD", "OPTIONS"):
-        if not hmac.compare_digest(request.headers.get("X-CSRF-Token", ""), session["csrf"]):
-            fail(403, "csrf_failed", "会话校验失败，请刷新页面")
-    request.state.user = user
-    request.state.session = session
-    return user
+    if user:
+        if request.method not in ("GET", "HEAD", "OPTIONS"):
+            if not hmac.compare_digest(request.headers.get("X-CSRF-Token", ""), session["csrf"]):
+                fail(403, "csrf_failed", "会话校验失败，请刷新页面")
+        request.state.user = user
+        request.state.session = session
+        return user
+    raw = request.headers.get("X-API-Key", "")
+    authorization = request.headers.get("Authorization", "")
+    if authorization.lower().startswith("bearer "):
+        raw = authorization[7:].strip()
+    if raw and len(raw) <= 256 and request.url.path.startswith("/api/admin/"):
+        key_row = database.one(select(tables.keys).where(tables.keys.c.token_hash == digest(raw)))
+        if key_row and "policy:manage" in (key_row["scopes"] or []):
+            application, key = api_identity(request, scope="policy:manage")
+            user = {
+                "id": f"apikey:{key['id']}",
+                "username": f"key:{key['name']}",
+                "is_admin": False,
+                "enabled": True,
+                "api_key_id": key["id"],
+                "application_id": application["id"],
+                "project_id": application["project_id"],
+            }
+            request.state.user = user
+            request.state.session = {"id": key["id"], "csrf": ""}
+            request.state.api_key = key
+            request.state.api_application = application
+            return user
+    fail(401, "authentication_required", "请先登录")
 
 
 def project_access(request, project_id, roles=None):
     user = current_user(request)
+    if not project_id and user.get("project_id"):
+        project_id = user["project_id"]
     database = request.app.state.db
     project = database.one(select(tables.projects).where(tables.projects.c.id == project_id))
     if not project:
         fail(404, "not_found", "项目不存在")
-    if user["is_admin"]:
+    if user["is_admin"] or user.get("project_id") == project_id:
         return user
     member = database.one(select(tables.members).where(
         tables.members.c.user_id == user["id"], tables.members.c.project_id == project_id))

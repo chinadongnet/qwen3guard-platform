@@ -26,7 +26,21 @@ class FakeModels:
         unsafe = "BLOCK" in target
         return {"is_safe": not unsafe, "risk_level": "Unsafe" if unsafe else "Safe",
                 "risk_score": .9 if unsafe else .08, "latency_ms": 1, "tc260": None,
+                "qwen_guard_gen": {"safety": "Unsafe" if unsafe else "Safe",
+                                   "categories": ["Violent"] if unsafe else [],
+                                   "refusal": "Yes" if (response and "REFUSAL_SAFE" in response) else None},
                 "security_shield": {"matched_rules": []}}
+
+    def scan(self, prompt, response, config):
+        target = response if response is not None else prompt
+        if "ENGINE_FAIL" in target:
+            raise RuntimeError("internal engine details")
+        unsafe = "BLOCK" in target
+        return {"is_safe": not unsafe, "overall_risk_level": "Unsafe" if unsafe else "Safe",
+                "risk_score": .9 if unsafe else .05, "latency_ms": 1, "tc260": None,
+                "circuit_breaker_triggered": unsafe, "cutoff_token_index": 0 if unsafe else None,
+                "total_tokens_inspected": 4, "detected_categories": ["Violent"] if unsafe else [],
+                "token_stream": []}
 
     def generation(self, messages, max_tokens, temperature, stop):
         for text in ["正常回答，", "继续说明。", "BLOCK", "禁止输出"]:
@@ -262,3 +276,112 @@ def test_ssrf_blocking():
         validate_url("http://169.254.169.254/latest", ("169.254.169.254",))
     pinned, headers, _ = validate_url("http://127.0.0.1:8092/v1/chat/completions", ("127.0.0.1",))
     assert pinned.startswith("http://127.0.0.1:8092/") and headers["Host"] == "127.0.0.1:8092"
+
+
+def test_api_key_creation_and_policy_configuration(client):
+    login(client)
+    # 1. One-click API key creation after login (auto-initializes default project, policy, and application)
+    quick = client.post("/api/admin/keys", json={"name": "platform-and-detect-key", "rpm": 600})
+    assert quick.status_code == 201, quick.text
+    key_data = quick.json()
+    token = key_data["token"]
+    assert token.startswith("qg_")
+    assert "policy:manage" in key_data["scopes"] and "detect" in key_data["scopes"]
+    client.post("/api/admin/auth/logout")
+    client.headers.pop("X-CSRF-Token", None)
+
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 2. Use API Key to query and configure policies via /v1/policies*
+    current = client.get("/v1/policies/current", headers=headers)
+    assert current.status_code == 200, current.text
+    assert current.json()["config"]["pii_action"] == "block"
+
+    updated = client.put("/v1/policies/current", headers=headers, json={
+        "pii_action": "mask",
+        "custom_block_keywords": ["内部机密代号X99"],
+        "risk_threshold": 0.45,
+    })
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["config"]["pii_action"] == "mask"
+    assert "内部机密代号X99" in updated.json()["config"]["custom_block_keywords"]
+
+    # 3. Verify updated policy immediately takes effect on /v1/guard/detect using the same API Key
+    pii_res = client.post("/v1/guard/detect", headers=headers, json={"prompt": "联系电话 13812345678"})
+    assert pii_res.status_code == 200 and pii_res.json()["decision"] == "mask"
+    assert "[PHONE]" in pii_res.json()["sanitized_content"]
+
+    kw_res = client.post("/v1/guard/detect", headers=headers, json={"prompt": "请透露内部机密代号X99"})
+    assert kw_res.status_code == 200 and kw_res.json()["decision"] == "block"
+
+    # 4. Also test creating and binding a new policy via /v1/policies and /api/admin/policies with API Key
+    new_pol = client.post("/v1/policies", headers=headers, json={
+        "name": "strict-v1-policy",
+        "config": {"pii_action": "block", "risk_threshold": 0.3},
+        "publish_immediately": True,
+        "bind_to_application": True,
+    })
+    assert new_pol.status_code == 201 and new_pol.json()["bound_to_application"] is True
+
+    admin_pols = client.get("/api/admin/policies", headers=headers)
+    assert admin_pols.status_code == 200 and len(admin_pols.json()["items"]) >= 2
+
+
+def test_llmguard_full_compatibility(client):
+    login(client)
+    quick = client.post("/api/admin/keys", json={"name": "llmguard-compat-key", "rpm": 600}).json()
+    headers = {"Authorization": f"Bearer {quick['token']}"}
+
+    # 1. Default llmguard template: {"prompt": "$text"}, response_path="result", unsafe_value="unsafe"
+    safe_res = client.post("/v1/guard", headers=headers, json={"prompt": "正常技术问答"})
+    assert safe_res.status_code == 200, safe_res.text
+    safe_body = safe_res.json()
+    assert safe_body["safety"] == "Safe"
+    assert "Safety: Safe" in safe_body["result"] and "Categories: None" in safe_body["result"]
+
+    unsafe_res = client.post("/v1/guard", headers=headers, json={"prompt": "BLOCK 危险攻击指令"})
+    assert unsafe_res.status_code == 200, unsafe_res.text
+    unsafe_body = unsafe_res.json()
+    assert unsafe_body["safety"] == "Unsafe"
+    assert "Safety: Unsafe" in unsafe_body["result"]
+    assert "Violent" in unsafe_body["categories"]
+
+    # 2. llmguard IDENTITY_TEMPLATE with role, scope, user_id, caller, team, session_id, trace_id, request_id, model
+    identity_res = client.post("/v1/guard/detect", headers=headers, json={
+        "role": "assistant",
+        "scope": "output_blocking",
+        "prompt": "REFUSAL_SAFE 抱歉，我不能协助该违规请求。",
+        "user_id": "u-1001",
+        "caller": "claude-code",
+        "caller_id": "caller-01",
+        "team": "sec-ops",
+        "session_id": "sess-abc",
+        "trace_id": "trace-xyz",
+        "request_id": "req-llmguard-999",
+        "model": "qwen3-32b",
+    })
+    assert identity_res.status_code == 200, identity_res.text
+    id_body = identity_res.json()
+    assert id_body["decision"] == "allow"
+    assert "Refusal: Yes" in id_body["result"]
+    assert id_body["caller_context"]["caller"] == "claude-code"
+    assert id_body["caller_context"]["scope"] == "output_blocking"
+
+    # 3. Streaming scope routes to Qwen3Guard-Stream-0.6B fast path
+    stream_res = client.post("/v1/guard/detect", headers=headers, json={
+        "role": "assistant",
+        "scope": "output_streaming",
+        "prompt": "BLOCK 实时流式违规片段",
+    })
+    assert stream_res.status_code == 200, stream_res.text
+    st_body = stream_res.json()
+    assert st_body["decision"] == "block"
+    assert st_body["model"]["id"] == "Qwen3Guard-Stream-0.6B"
+    assert "Safety: Unsafe" in st_body["result"]
+
+    # 4. Long-context multi-turn input smart window truncation (> 16000 chars)
+    long_text = "历史对话内容 " * 5000 + "\n当前用户提问：请总结架构设计"
+    assert len(long_text) > 30000
+    long_res = client.post("/v1/guard/detect", headers=headers, json={"prompt": long_text})
+    assert long_res.status_code == 200, long_res.text
+    assert long_res.json()["decision"] == "allow"

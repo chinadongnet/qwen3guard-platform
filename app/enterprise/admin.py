@@ -148,14 +148,19 @@ async def create_user(body: s.UserCreate, request: Request):
 async def list_projects(request: Request):
     user = current_user(request)
     statement = select(t.projects)
-    if not user["is_admin"]:
+    if user.get("project_id"):
+        statement = statement.where(t.projects.c.id == user["project_id"])
+    elif not user["is_admin"]:
         statement = statement.where(t.projects.c.id.in_(
             select(t.members.c.project_id).where(t.members.c.user_id == user["id"])))
     items = database(request).all(statement.order_by(t.projects.c.created_at))
     for item in items:
-        member = database(request).one(select(t.members).where(
-            t.members.c.project_id == item["id"], t.members.c.user_id == user["id"]))
-        item["role"] = "admin" if user["is_admin"] else member["role"]
+        if user["is_admin"] or user.get("project_id") == item["id"]:
+            item["role"] = "admin"
+        else:
+            member = database(request).one(select(t.members).where(
+                t.members.c.project_id == item["id"], t.members.c.user_id == user["id"]))
+            item["role"] = member["role"]
     return {"items": items}
 
 
@@ -194,8 +199,21 @@ async def set_member(project_id: str, body: s.Membership, request: Request):
     return {"ok": True}
 
 
+def _resolve_project_id(request: Request, project_id: str | None) -> str:
+    if project_id:
+        return project_id
+    user = current_user(request)
+    if user.get("project_id"):
+        return user["project_id"]
+    first = database(request).one(select(t.projects).order_by(t.projects.c.created_at))
+    if first:
+        return first["id"]
+    fail(422, "project_required", "请提供 project_id 或先创建项目")
+
+
 @router.get("/policies")
-async def list_policies(request: Request, project_id: str):
+async def list_policies(request: Request, project_id: str | None = None):
+    project_id = _resolve_project_id(request, project_id)
     project_access(request, project_id)
     db = database(request)
     items = db.all(select(t.policies).where(t.policies.c.project_id == project_id).order_by(t.policies.c.created_at.desc()))
@@ -206,7 +224,8 @@ async def list_policies(request: Request, project_id: str):
 
 
 @router.post("/policies", status_code=201)
-async def create_policy(body: s.PolicyCreate, request: Request, project_id: str):
+async def create_policy(body: s.PolicyCreate, request: Request, project_id: str | None = None):
+    project_id = _resolve_project_id(request, project_id)
     user = project_access(request, project_id, EDIT)
     db = database(request)
     policy_id = t.ident()
@@ -241,7 +260,7 @@ async def publish(policy_id: str, body: s.Publish, request: Request):
         t.versions.c.policy_id == policy_id, t.versions.c.version == body.version))
     if not version:
         fail(404, "not_found", "策略版本不存在")
-    if policy["published_version"] and body.version != policy["published_version"]:
+    if not body.skip_evaluation and policy["published_version"] and body.version != policy["published_version"]:
         history = db.all(select(t.operations.c.detail).where(
             t.operations.c.target_id == policy_id, t.operations.c.action == "policy.publish"))
         rollback = any(item["detail"].get("to") == body.version for item in history)
@@ -271,14 +290,16 @@ async def publish(policy_id: str, body: s.Publish, request: Request):
 
 
 @router.get("/applications")
-async def list_applications(request: Request, project_id: str):
+async def list_applications(request: Request, project_id: str | None = None):
+    project_id = _resolve_project_id(request, project_id)
     project_access(request, project_id)
     return {"items": database(request).all(select(t.apps).where(
         t.apps.c.project_id == project_id).order_by(t.apps.c.created_at.desc()))}
 
 
 @router.post("/applications", status_code=201)
-async def create_application(body: s.ApplicationCreate, request: Request, project_id: str):
+async def create_application(body: s.ApplicationCreate, request: Request, project_id: str | None = None):
+    project_id = _resolve_project_id(request, project_id)
     user = project_access(request, project_id, DEVELOP)
     db = database(request)
     policy = db.one(select(t.policies).where(t.policies.c.id == body.policy_id, t.policies.c.project_id == project_id))
@@ -302,6 +323,69 @@ async def enable_application(application_id: str, body: s.Enabled, request: Requ
 
 def public_key(key):
     return {k: v for k, v in key.items() if k != "token_hash"}
+
+
+@router.get("/keys")
+async def list_project_keys(request: Request, project_id: str | None = None):
+    project_id = _resolve_project_id(request, project_id)
+    project_access(request, project_id, DEVELOP)
+    db = database(request)
+    apps = {a["id"]: a for a in db.all(select(t.apps).where(t.apps.c.project_id == project_id))}
+    if not apps:
+        return {"items": []}
+    paused = {r["key_id"] for r in db.all(select(t.key_suspensions))}
+    rows = db.all(select(t.keys).where(t.keys.c.application_id.in_(list(apps.keys()))).order_by(t.keys.c.created_at.desc()))
+    return {"items": [{**public_key(k), "enabled": k["id"] not in paused,
+                       "application_name": apps[k["application_id"]]["name"]} for k in rows]}
+
+
+@router.post("/keys", status_code=201)
+async def quick_create_key(body: s.QuickKeyCreate, request: Request):
+    user = current_user(request)
+    db = database(request)
+    if body.application_id:
+        application = scoped_object(request, t.apps, body.application_id, DEVELOP)
+        project_id = application["project_id"]
+    else:
+        project_id = body.project_id or user.get("project_id")
+        if not project_id:
+            first_proj = db.one(select(t.projects).order_by(t.projects.c.created_at))
+            if first_proj:
+                project_id = first_proj["id"]
+            else:
+                if not user["is_admin"]:
+                    fail(403, "forbidden", "仅管理员可自动初始化默认项目")
+                proj = db.insert(t.projects, name="默认安全项目")
+                project_id = proj["id"]
+                db.operation(user["id"], "project.create", project_id, project_id)
+        project_access(request, project_id, DEVELOP)
+        application = db.one(select(t.apps).where(
+            t.apps.c.project_id == project_id, t.apps.c.enabled.is_(True)).order_by(t.apps.c.created_at))
+        if not application:
+            policy = db.one(select(t.policies).where(
+                t.policies.c.project_id == project_id, t.policies.c.published_version > 0).order_by(t.policies.c.created_at))
+            if not policy:
+                policy_id = t.ident()
+                with db.engine.begin() as conn:
+                    conn.execute(t.policies.insert().values(
+                        id=policy_id, created_at=time.time(), project_id=project_id,
+                        name="默认安全策略", published_version=1))
+                    conn.execute(t.versions.insert().values(
+                        id=t.ident(), created_at=time.time(), policy_id=policy_id,
+                        version=1, config=s.PolicyConfig().model_dump(), author_id=user["id"]))
+                db.operation(user["id"], "policy.create", policy_id, project_id)
+                policy = db.one(select(t.policies).where(t.policies.c.id == policy_id))
+            application = db.insert(t.apps, project_id=project_id, name="默认业务应用",
+                                    environment=body.environment, policy_id=policy["id"], enabled=True)
+            db.operation(user["id"], "application.create", application["id"], project_id)
+    token = "qg_" + secrets.token_urlsafe(32)
+    item = db.insert(t.keys, application_id=application["id"], name=body.name,
+        prefix=token[:11], token_hash=digest(token), expires_at=time.time() + body.expires_days * 86400,
+        revoked=False, rpm=body.rpm, scopes=body.scopes)
+    db.operation(user["id"], "key.create", item["id"], project_id)
+    return {**public_key(item), "token": token, "project_id": project_id,
+            "application_id": application["id"], "policy_id": application["policy_id"],
+            "notice": "仅本次显示，请存入业务系统的密钥管理器"}
 
 
 @router.get("/applications/{application_id}/keys")
@@ -399,8 +483,10 @@ async def rotate_key(key_id: str, request: Request):
 async def console_test(application_id: str, body: s.Detect, request: Request):
     application = scoped_object(request, t.apps, application_id, ("admin", "developer", "operator"))
     rate_limit(database(request), "console:" + request.state.user["id"], 30)
-    return await request.app.state.service.detect(application, None, body.context(), body.response,
-        request.state.request_id, source="sandbox", endpoint="console_test")
+    prompt, response = body.effective_pair()
+    return await request.app.state.service.detect(application, None, prompt, response,
+        request.state.request_id, source="sandbox", endpoint="console_test",
+        scope=body.scope, caller_context=body.caller_metadata())
 
 
 @router.get("/detections")

@@ -1,6 +1,6 @@
-import {api,state,scoped,esc,date,number,can,notify,uuid,copyText} from "./api.js?v=3.2.4";
-import {button,disabledButton,badge,empty,panel,table,heading,field,formModal,modal,json,metric} from "./components.js?v=3.2.4";
-import {AB_SAMPLES,DETECT_PRESETS,STREAM_PRESETS,LLM_PRESETS} from "./samples.js?v=3.2.4";
+import {api,state,scoped,esc,date,number,can,notify,uuid,copyText} from "./api.js?v=3.2.5";
+import {button,disabledButton,badge,empty,panel,table,heading,field,formModal,modal,json,metric} from "./components.js?v=3.2.5";
+import {AB_SAMPLES,DETECT_PRESETS,STREAM_PRESETS,LLM_PRESETS} from "./samples.js?v=3.2.5";
 let ui;
 export const initWorkbench=value=>{ui=value;};
 const base="/api/admin/workbench";

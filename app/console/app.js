@@ -1,7 +1,7 @@
-import {api,state,scoped,esc,date,notify,can,uuid,copyText} from "./api.js?v=3.2.4";
-import {pages,shell,loginView,renderPage} from "./views.js?v=3.2.4";
-import {button,badge,empty,panel,table,json,modal,field,formModal} from "./components.js?v=3.2.4";
-import {workbenchActions,initWorkbench} from "./workbench.js?v=3.2.4";
+import {api,state,scoped,esc,date,notify,can,uuid,copyText} from "./api.js?v=3.2.5";
+import {pages,shell,loginView,renderPage} from "./views.js?v=3.2.5";
+import {button,badge,empty,panel,table,json,modal,field,formModal} from "./components.js?v=3.2.5";
+import {workbenchActions,initWorkbench} from "./workbench.js?v=3.2.5";
 
 const root=document.getElementById("root"),dialog=document.getElementById("dialog");
 const close=()=>{dialog.close();dialog.innerHTML="";};
@@ -104,12 +104,37 @@ const actions={
   async "toggle-application"(id){const app=state.cache.applications.find(i=>i.id===id);await api(`/api/admin/applications/${id}/enabled`,{method:"PUT",body:{enabled:!app.enabled}});await saved("应用状态已更新");},
   async "edit-application"(id){const app=state.cache.applications.find(i=>i.id===id),policies=(await api(scoped("/api/admin/policies"))).items.filter(p=>p.published_version>0);formModal("修改应用设置",field("name","名称",{value:app.name,wide:true})+field("environment","环境",{value:app.environment,options:[{value:"production",label:"生产"},{value:"sandbox",label:"沙盒"}]})+field("policy_id","策略",{value:app.policy_id,options:policies.map(p=>({value:p.id,label:p.name}))}),async v=>{await api(`/api/admin/applications/${id}/settings`,{method:"PUT",body:v});await saved("应用设置已更新，历史记录保持原环境与策略");});},
   "new-key"(id){
-    formModal("创建 API Key",field("name","凭证名称",{wide:true})+field("rpm","每分钟检测条目",{type:"number",value:60,min:1,max:10000})+
+    formModal("创建 API Key",field("name","凭证名称",{wide:true,value:"默认业务凭证"})+field("rpm","每分钟检测条目",{type:"number",value:600,min:1,max:10000})+
       field("expires_days","有效期（天）",{type:"number",value:90,min:1,max:365})+
-      field("scopes","权限范围",{wide:true,options:[{value:"detect",label:"内容审核"},{value:"detect,audit:read",label:"内容审核 + 本应用审计"},{value:"detect,chat,audit:read",label:"内容审核 + 受控对话 + 本应用审计"}]}),async values=>{
+      field("scopes","权限范围",{wide:true,options:[
+        {value:"detect,chat,audit:read,policy:manage",label:"全功能凭证（内容审核 + 策略配置 API + 受控对话 + 审计）"},
+        {value:"detect,chat,audit:read",label:"内容审核 + 受控对话 + 本应用审计"},
+        {value:"detect,audit:read",label:"内容审核 + 本应用审计"},
+        {value:"detect",label:"仅内容审核"}
+      ]}),async values=>{
         const result=await api(`/api/admin/applications/${id}/keys`,{method:"POST",body:{...values,rpm:Number(values.rpm),expires_days:Number(values.expires_days),scopes:values.scopes.split(",")}});
+        await refresh();
         showSecret("请保存你的 API Key",result.token,"完整密钥只在本次显示。关闭后无法再次查看，请存入业务服务的密钥管理器。");
       },"创建凭证");
+  },
+  async "quick-new-key"(){
+    const apps=state.project?(await api(scoped("/api/admin/applications"))).items:[];
+    const appField=apps.length?field("application_id","绑定业务应用",{wide:true,options:apps.map(a=>({value:a.id,label:`${a.name} (${a.environment})`}))}):"";
+    formModal("一键创建 API Key",appField+field("name","凭证名称",{wide:true,value:"平台与检测 API Key"})+field("rpm","每分钟检测条目",{type:"number",value:600,min:1,max:10000})+
+      field("expires_days","有效期（天）",{type:"number",value:90,min:1,max:365})+
+      field("scopes","权限范围",{wide:true,options:[
+        {value:"detect,chat,audit:read,policy:manage",label:"全功能凭证（内容审核 + 策略配置 API + 受控对话 + 审计）"},
+        {value:"detect,chat,audit:read",label:"内容审核 + 受控对话 + 本应用审计"},
+        {value:"detect,audit:read",label:"内容审核 + 本应用审计"},
+        {value:"detect",label:"仅内容审核"}
+      ]}),async values=>{
+        const result=await api("/api/admin/keys",{method:"POST",body:{
+          name:values.name,project_id:state.project||null,application_id:values.application_id||null,
+          rpm:Number(values.rpm),expires_days:Number(values.expires_days),scopes:values.scopes.split(",")
+        }});
+        await loadProjects();await refresh();
+        showSecret("请保存你的 API Key",result.token,"完整密钥只在本次显示。支持直接调用 /v1/policies* 配置策略及 /v1/guard/* 进行内容检测。");
+      },"立即生成 API Key","若当前项目尚未创建策略或应用，系统将自动初始化默认已发布策略与默认应用。");
   },
   async "rotate-key"(id){
     const result=await api(`/api/admin/keys/${id}/rotate`,{method:"POST"});

@@ -7,7 +7,42 @@ from sqlalchemy import select
 
 from . import db as t
 from .inference import InferenceTimeout, QueueFull
+from .schemas import _window_truncate
 from .security import fail, pii_findings, redact
+
+# Canonical TC260 subcategory mappings aligned with scripts/build_tc260_dataset.py (TC260_TAXONOMY)
+_TC260_SUBCODE_TO_LLMG: dict[str, str] = {
+    "A.1.1": "Politics",        # 煽动颠覆国家政权、推翻社会主义制度
+    "A.1.2": "Politics",        # 危害国家安全和利益、损害国家形象
+    "A.1.3": "Politics",        # 煽动分裂国家、破坏国家统一和社会稳定
+    "A.1.4": "Terror",          # 宣扬恐怖主义、极端主义
+    "A.1.5": "Discrimination",  # 宣扬民族仇恨
+    "A.1.7": "Illegal",         # 传播虚假有害信息
+    "A.1.8": "Illegal",         # 其他法律、行政法规禁止的内容
+    "A.2.1": "Discrimination",  # 民族歧视内容
+    "A.2.2": "Discrimination",  # 信仰歧视内容
+    "A.2.3": "Discrimination",  # 国别歧视内容
+    "A.2.4": "Discrimination",  # 地域歧视内容
+    "A.2.5": "Discrimination",  # 性别歧视内容
+    "A.2.6": "Discrimination",  # 年龄歧视内容
+    "A.2.7": "Discrimination",  # 职业歧视内容
+    "A.2.8": "Discrimination",  # 健康歧视内容
+    "A.2.9": "Discrimination",  # 其他方面歧视内容
+    "A.3.1": "Illegal",         # 侵犯他人知识产权
+    "A.3.2": "Illegal",         # 违反商业道德
+    "A.3.3": "Illegal",         # 泄露他人商业秘密
+    "A.3.4": "Illegal",         # 实施垄断和不正当竞争行为
+    "A.3.5": "Illegal",         # 其他商业违法违规行为
+    "A.4.1": "Self-Harm",       # 危害他人身心健康
+    "A.4.2": "Illegal",         # 侵害他人肖像权
+    "A.4.3": "Illegal",         # 侵害他人名誉权
+    "A.4.4": "Illegal",         # 侵害他人荣誉权
+    "A.4.5": "Privacy",         # 侵害他人隐私权
+    "A.4.6": "Privacy",         # 侵害他人个人信息权益
+    "A.4.7": "Illegal",         # 侵犯他人其他合法权益
+    "A.5.1": "Illegal",         # 内容不准确（医疗/金融/自动控制）
+    "A.5.2": "Illegal",         # 内容不可靠（心理咨询/关键信息基础设施）
+}
 
 
 def _build_llmguard_compat(decision: str, error, result: dict, findings: list, matched_rules: list[str]) -> tuple[str, list[str], str]:
@@ -27,37 +62,48 @@ def _build_llmguard_compat(decision: str, error, result: dict, findings: list, m
     sub_code = str(tc260.get("sub_code") or "")
     sub_name = str(tc260.get("sub_name") or "")
     raw_and_rules = " ".join([*raw_cats, *(matched_rules or [])]).lower()
-    combined = " ".join([*raw_cats, major_code, sub_code, sub_name, *(matched_rules or [])]).lower()
 
     canonical: list[str] = []
     def add_cat(c: str):
         if c and c not in canonical:
             canonical.append(c)
 
-    if any(k in combined for k in ("prompt_injection", "injection", "指令注入", "提示词注入", "间接注入")):
+    if any(k in raw_and_rules for k in ("prompt_injection", "injection", "指令注入", "提示词注入", "间接注入")):
         add_cat("Prompt_Injection")
-    if any(k in combined for k in ("jailbreak", "jb.", "越狱", "dan", "角色扮演绕过", "指令覆盖")):
+    if major_code == "JAILBREAK" or sub_code.startswith("JB") or any(
+        k in raw_and_rules for k in ("jailbreak", "jb.", "越狱", "dan", "角色扮演绕过", "指令覆盖")
+    ):
         add_cat("Jailbreak")
-    if findings or major_code == "PII" or any(k in combined for k in ("pii", "privacy", "个人信息", "隐私")):
+    if findings or major_code == "PII" or any(k in raw_and_rules for k in ("pii", "privacy", "个人信息", "隐私")):
         add_cat("Privacy")
-    if sub_code in ("A.1.5", "A.2.1") or any(k in combined for k in ("terror", "恐怖", "极端主义")):
+    if any(k in raw_and_rules for k in ("terror", "恐怖", "极端主义")):
         add_cat("Terror")
     if any(k in raw_and_rules for k in ("violent", "violence", "暴力", "杀害", "炸药", "爆炸", "武器", "枪支")):
         add_cat("Violent")
     if any(k in raw_and_rules for k in ("sexual", "porn", "色情", "淫秽")):
         add_cat("Sexual")
-    if sub_code == "A.1.6" and not any(c in canonical for c in ("Violent", "Sexual")):
-        add_cat("Violent")
-    if any(k in combined for k in ("drug", "毒品", "制毒", "吸毒", "冰毒", "海洛因")):
+    if any(k in raw_and_rules for k in ("drug", "毒品", "制毒", "吸毒", "冰毒", "海洛因")):
         add_cat("Drug")
-    if any(k in combined for k in ("gambling", "赌博", "博彩")):
+    if any(k in raw_and_rules for k in ("gambling", "赌博", "博彩")):
         add_cat("Gambling")
-    if sub_code in ("A.1.7", "A.2.2") or any(k in combined for k in ("hate", "discrimination", "歧视", "仇恨", "侮辱", "诽谤")):
+    if any(k in raw_and_rules for k in ("hate", "discrimination", "歧视", "仇恨", "侮辱", "诽谤")):
         add_cat("Discrimination")
-    if any(k in combined for k in ("suicide", "self-harm", "selfharm", "自杀", "自残")):
+    if any(k in raw_and_rules for k in ("suicide", "self-harm", "selfharm", "自杀", "自残")):
         add_cat("Self-Harm")
-    if sub_code in ("A.1.1", "A.1.2", "A.1.3", "A.1.4") or any(k in combined for k in ("politic", "政治", "颠覆", "分裂", "国家安全")):
+    if any(k in raw_and_rules for k in ("politic", "政治", "颠覆", "分裂", "国家安全")):
         add_cat("Politics")
+
+    # Map TC260 subcategory/major_code strictly according to TC260_TAXONOMY
+    if sub_code == "A.1.6":
+        if not any(c in canonical for c in ("Violent", "Sexual")):
+            add_cat("Violent")
+    elif sub_code in _TC260_SUBCODE_TO_LLMG:
+        add_cat(_TC260_SUBCODE_TO_LLMG[sub_code])
+    elif major_code == "A.2":
+        add_cat("Discrimination")
+    elif major_code in ("A.3", "A.4", "A.5"):
+        add_cat("Illegal")
+
     if not canonical:
         add_cat("Illegal")
 
@@ -105,6 +151,10 @@ class DetectionService:
             if config.get("pii_action") in ("mask", "audit"):
                 model_prompt = redact(prompt)
                 model_response = redact(response) if response is not None else None
+            # Apply window truncation only to the model inference copy; deterministic
+            # policy checks (PII spans, custom keywords, sanitization) use the full input.
+            model_prompt = _window_truncate(model_prompt) or ""
+            model_response = _window_truncate(model_response)
             use_stream_fastpath = (
                 _model_result is None
                 and (scope or "").strip().lower() == "output_streaming"

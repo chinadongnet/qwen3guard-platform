@@ -83,7 +83,8 @@ def current_user(request: Request):
     authorization = request.headers.get("Authorization", "")
     if authorization.lower().startswith("bearer "):
         raw = authorization[7:].strip()
-    if raw and len(raw) <= 256 and request.url.path.startswith("/api/admin/"):
+    is_policy_route = request.url.path == "/api/admin/policies" or request.url.path.startswith("/api/admin/policies/")
+    if raw and len(raw) <= 256 and is_policy_route:
         key_row = database.one(select(tables.keys).where(tables.keys.c.token_hash == digest(raw)))
         if key_row and "policy:manage" in (key_row["scopes"] or []):
             application, key = api_identity(request, scope="policy:manage")
@@ -112,7 +113,12 @@ def project_access(request, project_id, roles=None):
     project = database.one(select(tables.projects).where(tables.projects.c.id == project_id))
     if not project:
         fail(404, "not_found", "项目不存在")
-    if user["is_admin"] or user.get("project_id") == project_id:
+    if user.get("api_key_id"):
+        is_policy_route = request.url.path == "/api/admin/policies" or request.url.path.startswith("/api/admin/policies/")
+        if not is_policy_route or user.get("project_id") != project_id:
+            fail(403, "forbidden", "凭证仅限访问所属项目的策略管理接口")
+        return user
+    if user["is_admin"]:
         return user
     member = database.one(select(tables.members).where(
         tables.members.c.user_id == user["id"], tables.members.c.project_id == project_id))

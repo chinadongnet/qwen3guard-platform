@@ -161,8 +161,9 @@ async def catalog(request: Request):
             "compatibility": "Text chat streaming subset; moderation categories are platform-specific"}
 
 
-def _policy_api_identity(request: Request):
-    # Support keys with 'policy:manage' or 'detect' scope for V1 policy APIs
+def _policy_api_identity(request: Request, write: bool = False):
+    if write:
+        return api_identity(request, scope="policy:manage")
     raw = request.headers.get("X-API-Key", "")
     authorization = request.headers.get("Authorization", "")
     if authorization.lower().startswith("bearer "):
@@ -176,7 +177,7 @@ def _policy_api_identity(request: Request):
 
 @router.get("/v1/policies")
 async def v1_list_policies(request: Request):
-    application, _ = _policy_api_identity(request)
+    application, _ = _policy_api_identity(request, write=False)
     db = request.app.state.db
     items = db.all(select(t.policies).where(
         t.policies.c.project_id == application["project_id"]).order_by(t.policies.c.created_at.desc()))
@@ -193,7 +194,7 @@ async def v1_list_policies(request: Request):
 
 @router.get("/v1/policies/current")
 async def v1_current_policy(request: Request):
-    application, _ = _policy_api_identity(request)
+    application, _ = _policy_api_identity(request, write=False)
     db = request.app.state.db
     policy = db.one(select(t.policies).where(t.policies.c.id == application["policy_id"]))
     version = request.app.state.service.policy(application)
@@ -212,7 +213,7 @@ async def v1_current_policy(request: Request):
 
 @router.post("/v1/policies", status_code=201)
 async def v1_create_policy(body: s.V1PolicyCreate, request: Request):
-    application, key = _policy_api_identity(request)
+    application, key = _policy_api_identity(request, write=True)
     db = request.app.state.db
     project_id = application["project_id"]
     policy_id = t.ident()
@@ -250,8 +251,10 @@ async def v1_create_policy(body: s.V1PolicyCreate, request: Request):
 
 @router.put("/v1/policies/current")
 async def v1_update_current_policy(request: Request):
+    from fastapi.exceptions import RequestValidationError
+    from pydantic import ValidationError
     from sqlalchemy import func
-    application, key = _policy_api_identity(request)
+    application, key = _policy_api_identity(request, write=True)
     db = request.app.state.db
     try:
         payload = await request.json()
@@ -260,9 +263,14 @@ async def v1_update_current_policy(request: Request):
     if not isinstance(payload, dict):
         fail(422, "invalid_payload", "请求体须为策略配置字典")
     raw_updates = payload.get("config") if isinstance(payload.get("config"), dict) else payload
+    if not isinstance(raw_updates, dict):
+        fail(422, "invalid_payload", "请求体须为策略配置字典")
     current_version = request.app.state.service.policy(application)
-    merged = {**current_version["config"], **{k: v for k, v in raw_updates.items() if k in s.PolicyConfig.model_fields}}
-    validated_config = s.PolicyConfig(**merged).model_dump()
+    merged = {**current_version["config"], **raw_updates}
+    try:
+        validated_config = s.PolicyConfig(**merged).model_dump()
+    except ValidationError as exc:
+        raise RequestValidationError(exc.errors()) from exc
     policy_id = application["policy_id"]
     actor_id = f"apikey:{key['id']}"
     with db.engine.begin() as conn:
@@ -290,7 +298,7 @@ async def v1_update_current_policy(request: Request):
 @router.post("/v1/policies/{policy_id}/versions", status_code=201)
 async def v1_create_policy_version(policy_id: str, body: s.PolicyConfig, request: Request):
     from sqlalchemy import func
-    application, key = _policy_api_identity(request)
+    application, key = _policy_api_identity(request, write=True)
     db = request.app.state.db
     policy = db.one(select(t.policies).where(
         t.policies.c.id == policy_id, t.policies.c.project_id == application["project_id"]))
@@ -309,7 +317,7 @@ async def v1_create_policy_version(policy_id: str, body: s.PolicyConfig, request
 
 @router.post("/v1/policies/{policy_id}/publish")
 async def v1_publish_policy(policy_id: str, body: s.V1PolicyPublish, request: Request):
-    application, key = _policy_api_identity(request)
+    application, key = _policy_api_identity(request, write=True)
     db = request.app.state.db
     policy = db.one(select(t.policies).where(
         t.policies.c.id == policy_id, t.policies.c.project_id == application["project_id"]))
@@ -339,7 +347,7 @@ async def v1_publish_policy(policy_id: str, body: s.V1PolicyPublish, request: Re
 
 @router.put("/v1/policies/{policy_id}/bind")
 async def v1_bind_policy(policy_id: str, request: Request):
-    application, key = _policy_api_identity(request)
+    application, key = _policy_api_identity(request, write=True)
     db = request.app.state.db
     policy = db.one(select(t.policies).where(
         t.policies.c.id == policy_id, t.policies.c.project_id == application["project_id"]))

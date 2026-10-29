@@ -325,6 +325,22 @@ def public_key(key):
     return {k: v for k, v in key.items() if k != "token_hash"}
 
 
+def _resolve_key_scopes(request: Request, project_id: str, body: s.KeyCreate) -> list[str]:
+    scopes = list(body.scopes)
+    if "policy:manage" in scopes:
+        user = request.state.user
+        is_proj_admin = bool(user["is_admin"])
+        if not is_proj_admin:
+            member = database(request).one(select(t.members).where(
+                t.members.c.user_id == user["id"], t.members.c.project_id == project_id))
+            is_proj_admin = bool(member and member["role"] in EDIT)
+        if not is_proj_admin:
+            if "scopes" in body.model_fields_set:
+                fail(403, "forbidden", "仅项目管理员可授予 policy:manage 策略配置权限")
+            scopes = [sc for sc in scopes if sc != "policy:manage"]
+    return scopes
+
+
 @router.get("/keys")
 async def list_project_keys(request: Request, project_id: str | None = None):
     project_id = _resolve_project_id(request, project_id)
@@ -378,10 +394,11 @@ async def quick_create_key(body: s.QuickKeyCreate, request: Request):
             application = db.insert(t.apps, project_id=project_id, name="默认业务应用",
                                     environment=body.environment, policy_id=policy["id"], enabled=True)
             db.operation(user["id"], "application.create", application["id"], project_id)
+    scopes = _resolve_key_scopes(request, project_id, body)
     token = "qg_" + secrets.token_urlsafe(32)
     item = db.insert(t.keys, application_id=application["id"], name=body.name,
         prefix=token[:11], token_hash=digest(token), expires_at=time.time() + body.expires_days * 86400,
-        revoked=False, rpm=body.rpm, scopes=body.scopes)
+        revoked=False, rpm=body.rpm, scopes=scopes)
     db.operation(user["id"], "key.create", item["id"], project_id)
     return {**public_key(item), "token": token, "project_id": project_id,
             "application_id": application["id"], "policy_id": application["policy_id"],
@@ -436,11 +453,12 @@ async def application_settings(application_id: str, body: s.ApplicationCreate, r
 @router.post("/applications/{application_id}/keys", status_code=201)
 async def create_key(application_id: str, body: s.KeyCreate, request: Request):
     application = scoped_object(request, t.apps, application_id, DEVELOP)
+    scopes = _resolve_key_scopes(request, application["project_id"], body)
     db = database(request)
     token = "qg_" + secrets.token_urlsafe(32)
     item = db.insert(t.keys, application_id=application_id, name=body.name,
         prefix=token[:11], token_hash=digest(token), expires_at=time.time() + body.expires_days * 86400,
-        revoked=False, rpm=body.rpm, scopes=body.scopes)
+        revoked=False, rpm=body.rpm, scopes=scopes)
     db.operation(request.state.user["id"], "key.create", item["id"], application["project_id"])
     return {**public_key(item), "token": token, "notice": "仅本次显示，请存入业务系统的密钥管理器"}
 

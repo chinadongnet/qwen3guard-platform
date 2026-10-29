@@ -184,8 +184,7 @@ class Detect(StrictModel):
 
     def context(self):
         context = "\n".join(f"{m.role}: {m.content}" for m in self.messages)
-        joined = "\n".join(x for x in (context, self.prompt) if x)
-        return _window_truncate(joined) or ""
+        return "\n".join(x for x in (context, self.prompt) if x)
 
     def effective_pair(self) -> tuple[str, str | None]:
         role_norm = (self.role or "").strip().lower()
@@ -193,8 +192,8 @@ class Detect(StrictModel):
         is_output_scope = role_norm == "assistant" or scope_norm in ("output", "output_blocking", "output_streaming", "post_call")
         if self.response is None and is_output_scope and self.prompt:
             msg_ctx = "\n".join(f"{m.role}: {m.content}" for m in self.messages)
-            return (_window_truncate(msg_ctx) or "审核助手回复", _window_truncate(self.prompt))
-        return (self.context() or "审核助手回复", _window_truncate(self.response))
+            return (msg_ctx or "审核助手回复", self.prompt)
+        return (self.context() or "审核助手回复", self.response)
 
     def caller_metadata(self) -> dict | None:
         meta = {

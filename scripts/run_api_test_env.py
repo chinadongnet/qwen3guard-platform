@@ -292,11 +292,21 @@ class APITestRunner:
                     f"device={self.system_info.get('model', {}).get('device_name')}")
 
         # TC-KEY-01: One-step API Key creation after login (/api/admin/keys)
+        # First create an isolated sandbox project so benchmark runs never mutate existing applications
         t0 = time.perf_counter()
+        proj_resp = self.session.post(
+            f"{self.base_url}/api/admin/projects",
+            json={"name": f"api-benchmark-sandbox-{int(time.time())}"},
+            timeout=10,
+        )
+        proj_resp.raise_for_status()
+        isolated_project_id = proj_resp.json()["id"]
         key_resp = self.session.post(
             f"{self.base_url}/api/admin/keys",
             json={
                 "name": "e2e-benchmark-master-key",
+                "project_id": isolated_project_id,
+                "environment": "sandbox",
                 "rpm": 5000,
                 "expires_days": 90,
                 "scopes": ["detect", "chat", "audit:read", "policy:manage"],
@@ -310,8 +320,9 @@ class APITestRunner:
         self.application_id = key_data.get("application_id", "")
         self.policy_id = key_data.get("policy_id", "")
         self.record(
-            "TC-KEY-01", suite, "登录后一键创建全功能 API Key (POST /api/admin/keys)",
-            key_resp.status_code == 201 and self.api_key.startswith("qg_") and "policy:manage" in key_data.get("scopes", []),
+            "TC-KEY-01", suite, "登录后在独立沙箱项目中一键创建全功能 API Key (POST /api/admin/keys)",
+            key_resp.status_code == 201 and self.api_key.startswith("qg_")
+            and self.project_id == isolated_project_id and "policy:manage" in key_data.get("scopes", []),
             ms, f"prefix={key_data.get('prefix')} scopes={','.join(key_data.get('scopes', []))}"
         )
 
@@ -879,23 +890,29 @@ class APITestRunner:
                 "accuracy_pct": round(stats["correct"] / stats["total"] * 100, 2) if stats["total"] else 0.0,
             }
 
-        # Stream Effectiveness Benchmark (10 cases on Qwen3Guard-Stream-0.6B)
+        # Stream Effectiveness Benchmark (10 cases on standalone Qwen3Guard-Stream-0.6B via scope="output_streaming")
         s_tp = s_tn = s_fp = s_fn = 0
         stream_details: list[dict[str, Any]] = []
         for s_item in STREAM_EFFECTIVENESS_DATASET:
             t0 = time.perf_counter()
             s_resp = requests.post(
-                f"{self.base_url}/v1/guard/stream",
+                f"{self.base_url}/v1/guard/detect",
                 headers=headers,
-                json={"prompt": s_item["prompt"], "response": s_item["response"]},
+                json={
+                    "prompt": s_item["prompt"],
+                    "response": s_item["response"],
+                    "scope": "output_streaming",
+                    "include_stream_tokens": True,
+                },
                 timeout=30,
             )
             s_ms = (time.perf_counter() - t0) * 1000
             s_resp.raise_for_status()
             s_data = s_resp.json()
+            s_diag = s_data.get("stream_diagnostic") or {}
             pred_unsafe = (not s_data.get("is_safe", True)) or s_data.get("decision") == "block"
             exp_unsafe = s_item["expected_unsafe"]
-            s_ok = pred_unsafe == exp_unsafe
+            s_ok = pred_unsafe == exp_unsafe and (s_data.get("model") or {}).get("id") == "Qwen3Guard-Stream-0.6B"
             if exp_unsafe and pred_unsafe:
                 s_tp += 1
             elif not exp_unsafe and not pred_unsafe:
@@ -909,10 +926,11 @@ class APITestRunner:
                 "expected_unsafe": exp_unsafe,
                 "predicted_unsafe": pred_unsafe,
                 "correct": s_ok,
-                "tokens_inspected": s_data.get("total_tokens_inspected"),
-                "cutoff_token_index": s_data.get("cutoff_token_index"),
+                "model": (s_data.get("model") or {}).get("id"),
+                "tokens_inspected": s_diag.get("total_tokens_inspected"),
+                "cutoff_token_index": s_diag.get("cutoff_token_index"),
                 "latency_ms": round(s_ms, 2),
-                "model_latency_ms": s_data.get("latency_ms"),
+                "model_latency_ms": s_diag.get("latency_ms") or (s_data.get("timings_ms") or {}).get("model_reported"),
             })
 
         s_total = s_tp + s_tn + s_fp + s_fn
@@ -1029,16 +1047,22 @@ class APITestRunner:
         for sample in STREAM_EFFECTIVENESS_DATASET[:6]:
             t0 = time.perf_counter()
             sr = requests.post(
-                f"{self.base_url}/v1/guard/stream",
+                f"{self.base_url}/v1/guard/detect",
                 headers=headers,
-                json={"prompt": sample["prompt"], "response": sample["response"]},
+                json={
+                    "prompt": sample["prompt"],
+                    "response": sample["response"],
+                    "scope": "output_streaming",
+                    "include_stream_tokens": True,
+                },
                 timeout=30,
             )
             s_ms = (time.perf_counter() - t0) * 1000
             sr.raise_for_status()
             sd = sr.json()
-            tokens = sd.get("total_tokens_inspected") or 1
-            m_ms = sd.get("latency_ms") or s_ms
+            s_diag = sd.get("stream_diagnostic") or {}
+            tokens = s_diag.get("total_tokens_inspected") or 1
+            m_ms = s_diag.get("latency_ms") or (sd.get("timings_ms") or {}).get("model_reported") or s_ms
             stream_latencies.append(s_ms)
             stream_model_ms.append(float(m_ms))
             stream_tokens_per_sec.append(round(tokens / (float(m_ms) / 1000), 2))

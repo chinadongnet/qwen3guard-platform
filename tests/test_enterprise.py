@@ -326,6 +326,31 @@ def test_api_key_creation_and_policy_configuration(client):
     admin_pols = client.get("/api/admin/policies", headers=headers)
     assert admin_pols.status_code == 200 and len(admin_pols.json()["items"]) >= 2
 
+    # 5. Invalid policy update returns 422 validation_error instead of 500
+    bad_upd = client.put("/v1/policies/current", headers=headers, json={"risk_threshold": 2.0})
+    assert bad_upd.status_code == 422 and bad_upd.json()["error"]["code"] == "validation_error"
+
+    # 6. policy:manage API Key is restricted to policy routes and cannot access member/project management
+    proj_id = key_data["project_id"]
+    assert client.put(f"/api/admin/projects/{proj_id}/members", headers=headers,
+                      json={"user_id": "any", "role": "admin"}).status_code == 401
+    assert client.get("/api/admin/projects", headers=headers).status_code == 401
+
+    # 7. Non-admin developer cannot mint a key with policy:manage scope
+    login(client)
+    dev_user = client.post("/api/admin/users", json={"username": "dev-no-pol", "password": "developer-password"}).json()
+    client.put(f"/api/admin/projects/{proj_id}/members", json={"user_id": dev_user["id"], "role": "developer"})
+    client.post("/api/admin/auth/logout")
+    login(client, "dev-no-pol", "developer-password")
+    dev_explicit = client.post(f"/api/admin/applications/{key_data['application_id']}/keys",
+                               json={"name": "escalate", "scopes": ["detect", "policy:manage"]})
+    assert dev_explicit.status_code == 403
+    dev_default = client.post(f"/api/admin/applications/{key_data['application_id']}/keys",
+                              json={"name": "default-dev-key"})
+    assert dev_default.status_code == 201 and "policy:manage" not in dev_default.json()["scopes"]
+    assert client.put("/v1/policies/current", headers={"X-API-Key": dev_default.json()["token"]},
+                      json={"risk_threshold": 0.4}).status_code == 403
+
 
 def test_llmguard_full_compatibility(client):
     login(client)
@@ -380,8 +405,30 @@ def test_llmguard_full_compatibility(client):
     assert "Safety: Unsafe" in st_body["result"]
 
     # 4. Long-context multi-turn input smart window truncation (> 16000 chars)
+    # Deterministic checks (PII & custom keywords) still inspect the full untruncated middle segment
     long_text = "历史对话内容 " * 5000 + "\n当前用户提问：请总结架构设计"
     assert len(long_text) > 30000
     long_res = client.post("/v1/guard/detect", headers=headers, json={"prompt": long_text})
     assert long_res.status_code == 200, long_res.text
     assert long_res.json()["decision"] == "allow"
+
+    mid_pii_text = ("A" * 5000) + " 联系电话 13812345678 " + ("B" * 9000)
+    assert len(mid_pii_text) > 14000
+    mid_pii_res = client.post("/v1/guard/detect", headers=headers, json={"prompt": mid_pii_text})
+    assert mid_pii_res.status_code == 200 and mid_pii_res.json()["decision"] == "block"
+    assert len(mid_pii_res.json()["findings"]) == 1
+
+    # 5. Verify TC260 taxonomy alignment in _build_llmguard_compat
+    from app.enterprise.service import _build_llmguard_compat
+    _, cats_a14, _ = _build_llmguard_compat(
+        "block", None, {"tc260": {"major_code": "A.1", "sub_code": "A.1.4", "sub_name": "宣扬恐怖主义、极端主义"}}, [], [])
+    assert cats_a14[0] == "Terror"
+    _, cats_a15, _ = _build_llmguard_compat(
+        "block", None, {"tc260": {"major_code": "A.1", "sub_code": "A.1.5", "sub_name": "宣扬民族仇恨"}}, [], [])
+    assert cats_a15[0] == "Discrimination"
+    _, cats_a17, _ = _build_llmguard_compat(
+        "block", None, {"tc260": {"major_code": "A.1", "sub_code": "A.1.7", "sub_name": "传播虚假有害信息"}}, [], [])
+    assert cats_a17[0] == "Illegal"
+    _, cats_a21, _ = _build_llmguard_compat(
+        "block", None, {"tc260": {"major_code": "A.2", "sub_code": "A.2.1", "sub_name": "民族歧视内容"}}, [], [])
+    assert cats_a21[0] == "Discrimination"
